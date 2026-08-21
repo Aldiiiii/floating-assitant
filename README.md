@@ -97,18 +97,3 @@ src/lib/             API Tauri, database, dan window behavior
 src/stores/          Zustand state untuk chat dan settings
 src-tauri/src/       Command Rust: LLM, screenshot, dan window shape
 ```
-
-## Sebelum push ke GitHub
-
-`.gitignore` sudah mengecualikan dependency, hasil build, Rust target, log, env lokal, cache, dan database runtime. Tetap jangan commit API key atau URL server pribadi ke file yang dibagikan.
-
-Repository Git belum terinisialisasi pada folder ini. Setelah mengecek perubahan, inisialisasi dan push dengan:
-
-```powershell
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin <URL_REPOSITORY_ANDA>
-git push -u origin main
-```
