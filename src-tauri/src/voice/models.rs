@@ -96,6 +96,7 @@ async fn download_to(
     url: &str,
     target: &PathBuf,
     expected_sha: Option<String>,
+    fallback_size: Option<u64>,
 ) -> Result<(), String> {
     if let Some(parent) = target.parent() {
         paths::ensure_dir(&parent.to_path_buf())?;
@@ -120,7 +121,7 @@ async fn download_to(
         ));
     }
 
-    let total = resp.content_length();
+    let total = resp.content_length().or(fallback_size);
     let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
     let mut last_emit: u64 = 0;
@@ -216,11 +217,11 @@ pub async fn install_entry(
         }
 
         match entry.kind.as_str() {
-            "file" => download_to(&app, &key, &entry.url, &dest, entry.sha256.clone()).await,
+            "file" => download_to(&app, &key, &entry.url, &dest, entry.sha256.clone(), entry.size).await,
             "archive-zip" | "archive-targz" => {
                 let tmp_archive = dest.with_extension("download");
                 let dl =
-                    download_to(&app, &key, &entry.url, &tmp_archive, entry.sha256.clone()).await;
+                    download_to(&app, &key, &entry.url, &tmp_archive, entry.sha256.clone(), entry.size).await;
                 if let Err(e) = dl {
                     let _ = std::fs::remove_file(&tmp_archive);
                     return Err(e);
