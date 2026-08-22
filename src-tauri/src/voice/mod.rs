@@ -1,6 +1,8 @@
 //! Orchestrator voice: state machine recording/transcribing + TTS +
 //! manajemen model. Semua command diekspor ke frontend.
 
+use cpal::traits::{DeviceTrait, HostTrait};
+
 pub mod capture;
 pub mod models;
 pub mod playback;
@@ -63,15 +65,34 @@ pub async fn model_download(
 }
 
 #[tauri::command]
+pub fn audio_devices() -> Result<Vec<String>, String> {
+    let host = cpal::default_host();
+    let mut names = Vec::new();
+    let devices = host
+        .input_devices()
+        .map_err(|e| format!("Gagal enumerasi microphone: {e}"))?;
+    for device in devices {
+        if let Ok(desc) = device.description() {
+            let name = desc.name().to_string();
+            if !name.trim().is_empty() {
+                names.push(name);
+            }
+        }
+    }
+    Ok(names)
+}
+
+#[tauri::command]
 pub async fn voice_start(
     app: AppHandle,
     state: State<'_, VoiceState>,
+    device_name: Option<String>,
 ) -> Result<(), String> {
     let mut guard = state.recorder.lock().map_err(|_| "Voice terkunci.")?;
     if guard.is_some() {
         return Ok(()); // sudah merekam
     }
-    match capture::Recorder::start() {
+    match capture::Recorder::start(device_name.as_deref()) {
         Ok(rec) => {
             *guard = Some(rec);
             emit_voice_state(&app, "recording", None);

@@ -102,6 +102,7 @@ pub fn run() {
             screenshot::submit_area_selection,
             screenshot::cancel_area_selection,
             window_shape::set_window_shape,
+            voice::audio_devices,
             voice::voice_start,
             voice::voice_stop,
             voice::tts_speak,

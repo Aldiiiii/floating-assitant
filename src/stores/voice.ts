@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import {
+  audioDevices,
   modelDownload,
   modelStatus,
   ttsSpeak,
@@ -27,7 +28,12 @@ interface VoiceStateStore {
 
   downloads: Record<string, number | null>;
 
+  micDevice: string | null;
+  devices: string[];
+
   init: () => Promise<void>;
+  loadDevices: () => Promise<void>;
+  setMicDevice: (name: string | null) => void;
   setMicEnabled: (v: boolean) => void;
   setMode: (m: VoiceMode) => void;
   setSttModel: (m: SttModel) => void;
@@ -98,6 +104,28 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
   speaking: false,
 
   downloads: {},
+  micDevice: null,
+  devices: [],
+
+  loadDevices: async () => {
+    try {
+      const devices = await audioDevices();
+      set({ devices });
+      const current = useVoiceStore.getState().micDevice;
+      if (current && !devices.includes(current)) {
+        // Perangkat tersimpan tidak ada lagi → kembali ke default sistem.
+        set({ micDevice: null });
+        void persist("voice.micDevice", null);
+      }
+    } catch {
+      /* biarkan list kosong; error ditampilkan saat mulai merekam */
+    }
+  },
+
+  setMicDevice: (name) => {
+    set({ micDevice: name });
+    void persist("voice.micDevice", name);
+  },
 
   init: async () => {
     await ensureListeners();
@@ -108,7 +136,9 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
       (await store.get<SttModel>("voice.sttModel")) ?? "whisper-base";
     const autoSpeak = (await store.get<boolean>("voice.autoSpeak")) ?? false;
     const ttsVoice = (await store.get<TtsVoice>("voice.ttsVoice")) ?? "id";
-    set({ micEnabled, mode, sttModel, autoSpeak, ttsVoice });
+    const micDevice = (await store.get<string | null>("voice.micDevice")) ?? null;
+    set({ micEnabled, mode, sttModel, autoSpeak, ttsVoice, micDevice });
+    void get().loadDevices();
   },
 
   setMicEnabled: (v) => {
@@ -136,7 +166,7 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
     const s = get();
     if (!s.micEnabled || s.state !== "idle") return;
     try {
-      await voiceStart();
+      await voiceStart(get().micDevice);
       set({ error: null });
     } catch (e) {
       // voice-state error event juga ter-emit dari Rust; mirror di sini.

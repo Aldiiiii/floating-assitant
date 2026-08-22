@@ -63,12 +63,40 @@ fn map_open_error(e: cpal::Error) -> String {
     }
 }
 
+/// Cari device input berdasarkan nama; tanpa nama → default sistem.
+/// Nama tersimpan tapi device dicabut → error eksplisit (user in control).
+fn resolve_input_device(name: Option<&str>) -> Result<(cpal::Device, String), String> {
+    let host = cpal::default_host();
+
+    if let Some(want) = name.map(str::trim).filter(|s| !s.is_empty()) {
+        let devices = host
+            .input_devices()
+            .map_err(|e| format!("Gagal enumerasi microphone: {e}"))?;
+        for d in devices {
+            let n = match d.description() {
+                Ok(desc) => desc.name().to_string(),
+                Err(_) => continue,
+            };
+            if n == want {
+                return Ok((d, n));
+            }
+        }
+        return Err(format!(
+            "Microphone \"{want}\" tidak ditemukan.\n\nPeriksa koneksi perangkat \
+             atau pilih microphone lain di Pengaturan → Voice."
+        ));
+    }
+
+    let default = host
+        .default_input_device()
+        .ok_or("Tidak ada microphone terdeteksi pada perangkat ini.")?;
+    let name = default.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "Default".into());
+    Ok((default, name))
+}
+
 impl Recorder {
-    pub fn start() -> Result<Recorder, String> {
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or("Tidak ada microphone terdeteksi pada perangkat ini.")?;
+    pub fn start(device_name: Option<&str>) -> Result<Recorder, String> {
+        let (device, _resolved_name) = resolve_input_device(device_name)?;
         let supported = device
             .default_input_config()
             .map_err(|e| format!("Gagal membaca konfigurasi microphone: {e}"))?;

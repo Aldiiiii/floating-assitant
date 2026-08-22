@@ -69,8 +69,12 @@ export interface TranscriptPayload {
   duration_ms: number;
 }
 
-export function voiceStart(): Promise<void> {
-  return invoke("voice_start");
+export function voiceStart(deviceName?: string | null): Promise<void> {
+  return invoke("voice_start", { deviceName: deviceName ?? null });
+}
+
+export function audioDevices(): Promise<string[]> {
+  return invoke<string[]>("audio_devices");
 }
 
 export function voiceStop(modelKey: string): Promise<TranscriptPayload> {
