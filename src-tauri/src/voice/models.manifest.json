@@ -29,28 +29,28 @@
   },
   "piper-voice-id": {
     "type": "file",
-    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/id/id_ID/ardhi/medium/id_ID-ardhi-medium.onnx",
+    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/id/id_ID/news_tts/medium/id_ID-news_tts-medium.onnx",
     "sha256": null,
     "size": 65000000,
-    "dest": "models/tts/id_ID-ardhi-medium.onnx"
+    "dest": "models/tts/id_ID-news_tts-medium.onnx"
   },
   "piper-voice-id-config": {
     "type": "file",
-    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/id/id_ID/ardhi/medium/id_ID-ardhi-medium.onnx.json",
+    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/id/id_ID/news_tts/medium/id_ID-news_tts-medium.onnx.json",
     "sha256": null,
     "size": 5000,
-    "dest": "models/tts/id_ID-ardhi-medium.onnx.json"
+    "dest": "models/tts/id_ID-news_tts-medium.onnx.json"
   },
   "piper-voice-en": {
     "type": "file",
-    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
     "sha256": null,
     "size": 63000000,
     "dest": "models/tts/en_US-lessac-medium.onnx"
   },
   "piper-voice-en-config": {
     "type": "file",
-    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json",
+    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json",
     "sha256": null,
     "size": 5000,
     "dest": "models/tts/en_US-lessac-medium.onnx.json"

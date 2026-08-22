@@ -34,13 +34,25 @@ function VoiceSection() {
   const devices = useVoiceStore((s) => s.devices);
   const loadDevices = useVoiceStore((s) => s.loadDevices);
   const [installed, setInstalled] = useState<Record<string, boolean>>({});
+  const [installError, setInstallError] = useState<string | null>(null);
 
   useEffect(() => { void (async () => { const keys = ["whisper-base", "whisper-small", PIPER_BIN_KEY, "piper-voice-id", "piper-voice-id-config", "piper-voice-en", "piper-voice-en-config"]; const next: Record<string, boolean> = {}; for (const key of keys) { try { next[key] = (await modelStatus(key)).installed; } catch { next[key] = false; } } setInstalled((prev) => ({ ...prev, ...next })); })(); }, []);
 
   const installGroup = async (keys: string[]) => {
+    setInstallError(null);
     for (const key of keys) {
-      try { if (!(await modelStatus(key)).installed) await downloadModel(key); } catch { /* lanjut item berikutnya */ }
+      try {
+        if (!(await modelStatus(key)).installed) await downloadModel(key);
+      } catch (e) {
+        setInstallError(String(e));
+        await refresh(keys);
+        return;
+      }
     }
+    await refresh(keys);
+  };
+
+  const refresh = async (keys: string[]) => {
     const next: Record<string, boolean> = {};
     for (const key of keys) { try { next[key] = (await modelStatus(key)).installed; } catch { next[key] = false; } }
     setInstalled((prev) => ({ ...prev, ...next }));
@@ -51,7 +63,7 @@ function VoiceSection() {
     { key: "whisper-small", modelKey: "whisper-small", label: "Akurat", detail: "Whisper Small · ±490 MB" },
   ];
   const ttsOptions: { key: TtsVoice; keys: string[]; label: string; detail: string }[] = [
-    { key: "id", keys: [PIPER_BIN_KEY, "piper-voice-id", "piper-voice-id-config"], label: "Bahasa Indonesia", detail: "Piper Ardhi · ±65 MB" },
+    { key: "id", keys: [PIPER_BIN_KEY, "piper-voice-id", "piper-voice-id-config"], label: "Bahasa Indonesia", detail: "Piper News · ±63 MB" },
     { key: "en", keys: [PIPER_BIN_KEY, "piper-voice-en", "piper-voice-en-config"], label: "English", detail: "Piper Lessac · ±63 MB" },
   ];
 
@@ -62,6 +74,7 @@ function VoiceSection() {
     <div className="rounded-xl border border-white/[.06] bg-white/[.025] px-3 py-3"><p className="text-[11px] font-medium text-slate-200">Pengenalan suara</p><div className="mt-2 space-y-1.5">{sttOptions.map((option) => <div key={option.key} onClick={() => installed[option.modelKey] && setSttModel(option.key)} className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border px-2.5 py-2 transition-colors ${sttModel === option.key ? "border-[#c8f16b]/50 bg-[#c8f16b]/[.07]" : "border-white/[.06]"} ${!installed[option.modelKey] && "opacity-60"}`}><div><p className="text-[10px] font-medium text-slate-200">{option.label}{sttModel === option.key && installed[option.modelKey] ? " · aktif" : ""}</p><p className="text-[9px] text-slate-500">{option.detail}</p></div><InstallChip keys={[option.modelKey]} installed={installed} onInstall={(keys) => void installGroup(keys)} /></div>)}</div></div>
     <div className="rounded-xl border border-white/[.06] bg-white/[.025] px-3 py-3"><p className="text-[11px] font-medium text-slate-200">Suara jawaban</p><div className="mt-2 space-y-1.5">{ttsOptions.map((option) => <div key={option.key} onClick={() => option.keys.every((k) => installed[k]) && setTtsVoice(option.key)} className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border px-2.5 py-2 transition-colors ${ttsVoice === option.key ? "border-[#c8f16b]/50 bg-[#c8f16b]/[.07]" : "border-white/[.06]"}`}><div><p className="text-[10px] font-medium text-slate-200">{option.label}{ttsVoice === option.key && option.keys.every((k) => installed[k]) ? " · aktif" : ""}</p><p className="text-[9px] text-slate-500">{option.detail}</p></div><InstallChip keys={option.keys} installed={installed} onInstall={(keys) => void installGroup(keys)} /></div>)}</div></div>
     <SettingRow title="Auto-speak" description="Bacakan otomatis setiap jawaban AI selesai." checked={autoSpeak} onChange={setAutoSpeak} />
+    {installError && <div className="rounded-lg border border-[#f07167]/25 bg-[#f07167]/10 px-2.5 py-2 text-[10px] leading-relaxed whitespace-pre-line text-[#f4aca5]">{installError}</div>}
     <p className="px-1 pt-1 text-[9px] leading-relaxed text-slate-600"><Icon name="shield" className="mr-1 inline h-3 w-3 -translate-y-px" />Semua pemrosesan suara berjalan lokal di perangkat ini.</p>
   </div></section>;
 }

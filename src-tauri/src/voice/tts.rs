@@ -16,7 +16,7 @@ pub struct PiperSetup {
 }
 
 const VOICES: &[(&str, &str)] = &[
-    ("id", "id_ID-ardhi-medium"),
+    ("id", "id_ID-news_tts-medium"),
     ("en", "en_US-lessac-medium"),
 ];
 

@@ -56,3 +56,14 @@ textarea.composer-input:focus-visible {
   scrollbar-width: thin;
   scrollbar-color: rgb(200 241 107 / 0.35) transparent;
 }
+
+/* Dropdown native (select) ikut gelap */
+:root,
+select {
+  color-scheme: dark;
+}
+
+select option {
+  background-color: #242421;
+  color: #e4e3dc;
+}
