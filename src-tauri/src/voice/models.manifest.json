@@ -1,0 +1,58 @@
+{
+  "whisper-base": {
+    "type": "file",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+    "sha256": null,
+    "size": 148000000,
+    "dest": "models/ggml-base.bin"
+  },
+  "whisper-small": {
+    "type": "file",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+    "sha256": null,
+    "size": 488000000,
+    "dest": "models/ggml-small.bin"
+  },
+  "piper-bin-windows": {
+    "type": "archive-zip",
+    "url": "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip",
+    "sha256": null,
+    "size": 17000000,
+    "dest": "bin/"
+  },
+  "piper-bin-linux": {
+    "type": "archive-targz",
+    "url": "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_amd64.tar.gz",
+    "sha256": null,
+    "size": 19000000,
+    "dest": "bin/"
+  },
+  "piper-voice-id": {
+    "type": "file",
+    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/id/id_ID/ardhi/medium/id_ID-ardhi-medium.onnx",
+    "sha256": null,
+    "size": 65000000,
+    "dest": "models/tts/id_ID-ardhi-medium.onnx"
+  },
+  "piper-voice-id-config": {
+    "type": "file",
+    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/id/id_ID/ardhi/medium/id_ID-ardhi-medium.onnx.json",
+    "sha256": null,
+    "size": 5000,
+    "dest": "models/tts/id_ID-ardhi-medium.onnx.json"
+  },
+  "piper-voice-en": {
+    "type": "file",
+    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx",
+    "sha256": null,
+    "size": 63000000,
+    "dest": "models/tts/en_US-lessac-medium.onnx"
+  },
+  "piper-voice-en-config": {
+    "type": "file",
+    "url": "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json",
+    "sha256": null,
+    "size": 5000,
+    "dest": "models/tts/en_US-lessac-medium.onnx.json"
+  }
+}

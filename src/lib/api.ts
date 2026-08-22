@@ -60,3 +60,37 @@ export async function chatStream(args: {
 export async function chatCancel(id: number): Promise<void> {
   return invoke("chat_cancel", { id });
 }
+
+// ---- Voice ----
+
+export interface TranscriptPayload {
+  text: string;
+  language: string;
+  duration_ms: number;
+}
+
+export function voiceStart(): Promise<void> {
+  return invoke("voice_start");
+}
+
+export function voiceStop(modelKey: string): Promise<TranscriptPayload> {
+  return invoke("voice_stop", { modelKey });
+}
+
+export function ttsSpeak(text: string, voice: string): Promise<void> {
+  return invoke("tts_speak", { text, voice });
+}
+
+export function ttsStop(): Promise<void> {
+  return invoke("tts_stop");
+}
+
+export function modelStatus(
+  key: string,
+): Promise<{ installed: boolean; downloading: boolean }> {
+  return invoke("model_status", { key });
+}
+
+export function modelDownload(key: string): Promise<void> {
+  return invoke("model_download", { key });
+}

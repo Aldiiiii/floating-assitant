@@ -5,16 +5,19 @@ import { ChatPanel } from "./components/ChatPanel";
 import { changeMode, restoreStartup, watchPosition, type Mode } from "./lib/window";
 import { useChatStore } from "./stores/chat";
 import { useSettingsStore } from "./stores/settings";
+import { useVoiceStore } from "./stores/voice";
 
 function App() {
   const [mode, setMode] = useState<Mode>("bubble");
   const initSettings = useSettingsStore((s) => s.init);
   const initChat = useChatStore((s) => s.init);
+  const initVoice = useVoiceStore((s) => s.init);
 
   useEffect(() => {
     void initSettings();
     void initChat();
-  }, [initSettings, initChat]);
+    void initVoice();
+  }, [initSettings, initChat, initVoice]);
 
   useEffect(() => {
     let active = true;

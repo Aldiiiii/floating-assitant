@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { db, type ConversationRow } from "../lib/db";
 import { useSettingsStore } from "./settings";
+import { useVoiceStore } from "./voice";
 
 export type Role = "user" | "assistant";
 
@@ -139,6 +140,9 @@ async function ensureListeners() {
       messages = dropTrailingEmptyAssistant(messages);
       useChatStore.setState({ streaming: false, messages });
       void refreshConversations();
+      if (useVoiceStore.getState().autoSpeak && content.trim() !== "") {
+        void useVoiceStore.getState().speak(content).catch(() => undefined);
+      }
     }
   });
 

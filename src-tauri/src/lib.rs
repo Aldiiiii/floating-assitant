@@ -8,7 +8,9 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 
 mod llm;
 mod lm;
+mod platform;
 mod screenshot;
+mod voice;
 mod window_shape;
 
 const MIGRATIONS: &[Migration] = &[
@@ -88,6 +90,8 @@ pub fn run() {
         )
         .manage(llm::StreamRegistry::default())
         .manage(screenshot::AreaSelectionState::default())
+        .manage(voice::VoiceState::default())
+        .manage(voice::models::DownloadRegistry::default())
         .invoke_handler(tauri::generate_handler![
             lm::lm_list_models,
             llm::chat_stream,
@@ -97,7 +101,13 @@ pub fn run() {
             screenshot::capture_area,
             screenshot::submit_area_selection,
             screenshot::cancel_area_selection,
-            window_shape::set_window_shape
+            window_shape::set_window_shape,
+            voice::voice_start,
+            voice::voice_stop,
+            voice::tts_speak,
+            voice::tts_stop,
+            voice::model_status,
+            voice::model_download
         ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Tampilkan", true, None::<&str>)?;

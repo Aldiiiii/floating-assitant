@@ -1,3 +1,4 @@
+use crate::platform;
 use base64::Engine;
 use image::codecs::png::PngEncoder;
 use image::imageops::FilterType;
@@ -73,22 +74,6 @@ fn capture_main_monitor() -> Result<RgbaImage, String> {
 }
 
 #[cfg(windows)]
-fn foreground_pid() -> Option<u32> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowThreadProcessId,
-    };
-    unsafe {
-        let hwnd = GetForegroundWindow();
-        if hwnd.is_null() {
-            return None;
-        }
-        let mut pid: u32 = 0;
-        GetWindowThreadProcessId(hwnd, &mut pid);
-        if pid == 0 { None } else { Some(pid) }
-    }
-}
-
-#[cfg(windows)]
 fn capture_window_by_pid(pid: u32) -> Result<RgbaImage, String> {
     let windows = xcap::Window::all().map_err(|e| format!("Screenshot gagal diambil. ({e})"))?;
     let mut best: Option<(u64, RgbaImage)> = None;
@@ -108,7 +93,7 @@ fn capture_window_by_pid(pid: u32) -> Result<RgbaImage, String> {
 
 #[cfg(not(windows))]
 fn capture_window_by_pid(_pid: u32) -> Result<RgbaImage, String> {
-    Err("Capture window aktif hanya didukung di Windows.".into())
+    Err("Capture window aktif belum didukung di platform ini.".into())
 }
 
 fn hide_main(app: &AppHandle) {
@@ -181,7 +166,7 @@ pub async fn capture_active_window(app: AppHandle) -> Result<ScreenshotData, Str
     hide_main(&app);
     settle_after_hide().await;
     let res = (|| {
-        let pid = foreground_pid().ok_or("Tidak ada window aktif yang terdeteksi.")?;
+        let pid = platform::foreground_pid().ok_or("Tidak ada window aktif yang terdeteksi.")?;
         if pid == std::process::id() {
             return Err("Window aktif adalah assistant itu sendiri.".into());
         }

@@ -30,6 +30,13 @@ futures-util = "0.3"
 xcap = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
+whisper-rs = "0.16.0"
+cpal = "0.18.2"
+rodio = "0.22.2"
+sha2 = "0.11.0"
+zip = "8.6.0"
+flate2 = "1.1.9"
+tar = "0.4.46"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
