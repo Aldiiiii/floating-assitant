@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import {
   audioDevices,
+  audioOutputDevices,
   modelDownload,
   modelStatus,
   ttsSpeak,
@@ -30,10 +31,15 @@ interface VoiceStateStore {
 
   micDevice: string | null;
   devices: string[];
+  speakerDevice: string | null;
+  outputDevices: string[];
+  playbackError: string | null;
 
   init: () => Promise<void>;
   loadDevices: () => Promise<void>;
   setMicDevice: (name: string | null) => void;
+  loadOutputDevices: () => Promise<void>;
+  setSpeakerDevice: (name: string | null) => void;
   setMicEnabled: (v: boolean) => void;
   setMode: (m: VoiceMode) => void;
   setSttModel: (m: SttModel) => void;
@@ -68,8 +74,10 @@ async function ensureListeners() {
 
   void listen<{ state: string; error?: string }>("tts-state", (e) => {
     if (e.payload.state === "playing" || e.payload.state === "loading") {
-      useVoiceStore.setState({ speaking: true });
-    } else if (e.payload.state === "idle" || e.payload.state === "stopped") {
+      useVoiceStore.setState({ speaking: true, playbackError: e.payload.error ?? null });
+    } else if (e.payload.state === "error") {
+      useVoiceStore.setState({ speaking: false, playbackError: e.payload.error ?? "TTS gagal." });
+    } else {
       useVoiceStore.setState({ speaking: false });
     }
   });
@@ -106,6 +114,9 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
   downloads: {},
   micDevice: null,
   devices: [],
+  speakerDevice: null,
+  outputDevices: [],
+  playbackError: null,
 
   loadDevices: async () => {
     try {
@@ -127,6 +138,25 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
     void persist("voice.micDevice", name);
   },
 
+  loadOutputDevices: async () => {
+    try {
+      const outputDevices = await audioOutputDevices();
+      set({ outputDevices });
+      const current = useVoiceStore.getState().speakerDevice;
+      if (current && !outputDevices.includes(current)) {
+        set({ speakerDevice: null });
+        void persist("voice.speakerDevice", null);
+      }
+    } catch {
+      /* biarkan kosong; error tampil saat memutar suara */
+    }
+  },
+
+  setSpeakerDevice: (name) => {
+    set({ speakerDevice: name });
+    void persist("voice.speakerDevice", name);
+  },
+
   init: async () => {
     await ensureListeners();
     const store = await getStore();
@@ -137,8 +167,10 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
     const autoSpeak = (await store.get<boolean>("voice.autoSpeak")) ?? false;
     const ttsVoice = (await store.get<TtsVoice>("voice.ttsVoice")) ?? "id";
     const micDevice = (await store.get<string | null>("voice.micDevice")) ?? null;
-    set({ micEnabled, mode, sttModel, autoSpeak, ttsVoice, micDevice });
+    const speakerDevice = (await store.get<string | null>("voice.speakerDevice")) ?? null;
+    set({ micEnabled, mode, sttModel, autoSpeak, ttsVoice, micDevice, speakerDevice });
     void get().loadDevices();
+    void get().loadOutputDevices();
   },
 
   setMicEnabled: (v) => {
@@ -194,11 +226,13 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
   speak: async (text) => {
     const clean = text.trim();
     if (clean === "") return;
+    set({ speaking: true, playbackError: null });
     try {
-      await ttsSpeak(clean, get().ttsVoice);
+      await ttsSpeak(clean, get().ttsVoice, get().speakerDevice);
     } catch (e) {
-      set({ speaking: false });
-      throw e;
+      const msg = String(e);
+      set({ speaking: false, playbackError: msg });
+      console.error("[tts]", msg);
     }
   },
 

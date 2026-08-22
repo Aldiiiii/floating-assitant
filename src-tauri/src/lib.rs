@@ -107,6 +107,7 @@ pub fn run() {
             voice::voice_stop,
             voice::tts_speak,
             voice::tts_stop,
+            voice::audio_output_devices,
             voice::model_status,
             voice::model_download
         ])

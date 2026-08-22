@@ -81,8 +81,16 @@ export function voiceStop(modelKey: string): Promise<TranscriptPayload> {
   return invoke("voice_stop", { modelKey });
 }
 
-export function ttsSpeak(text: string, voice: string): Promise<void> {
-  return invoke("tts_speak", { text, voice });
+export function ttsSpeak(
+  text: string,
+  voice: string,
+  speakerDevice?: string | null,
+): Promise<void> {
+  return invoke("tts_speak", { text, voice, speakerDevice: speakerDevice ?? null });
+}
+
+export function audioOutputDevices(): Promise<string[]> {
+  return invoke<string[]>("audio_output_devices");
 }
 
 export function ttsStop(): Promise<void> {

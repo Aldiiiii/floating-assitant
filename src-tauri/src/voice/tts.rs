@@ -71,8 +71,9 @@ pub fn synthesize(app: &AppHandle, text: &str, key: &str) -> Result<PathBuf, Str
         .arg("--output_file")
         .arg(&out)
         .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        // Log piper dibuang, tapi tetap ditampung agar bisa dilaporkan saat gagal.
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     #[cfg(windows)]
     {
@@ -94,10 +95,10 @@ pub fn synthesize(app: &AppHandle, text: &str, key: &str) -> Result<PathBuf, Str
 
     if !status.success() || !out.exists() {
         let _ = std::fs::remove_file(&out);
-        return Err(
-            "Sintesis suara gagal.\n\nPeriksa instalasi voice di Pengaturan → Voice."
-                .to_string(),
-        );
+        return Err(format!(
+            "Sintesis suara gagal (exit {status}).\n\nPeriksa instalasi voice di \
+             Pengaturan → Voice."
+        ));
     }
     Ok(out)
 }

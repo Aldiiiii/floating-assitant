@@ -26,6 +26,7 @@ export function Composer() {
   const micEnabled = useVoiceStore((s) => s.micEnabled);
   const voiceMode = useVoiceStore((s) => s.mode);
   const voiceError = useVoiceStore((s) => s.error);
+  const playbackError = useVoiceStore((s) => s.playbackError);
   const startRecording = useVoiceStore((s) => s.startRecording);
   const stopRecording = useVoiceStore((s) => s.stopRecording);
   const composingRef = useRef(false);
@@ -92,6 +93,7 @@ export function Composer() {
       {!capturing && attachment && <div className="flex items-center gap-2 border border-white/[.08] bg-white/[.04] p-1.5"><img src={attachment.dataUrl} alt="Screenshot terlampir" className="h-10 w-14 object-cover" /><div><p className="text-[10px] text-[#dbdad3]">Konteks layar terpasang</p><p className="mt-0.5 text-[9px] text-[#85857d]">{attachment.width} × {attachment.height}</p></div><button onClick={removeAttachment} title="Hapus screenshot" className="ml-auto flex h-7 w-7 items-center justify-center text-[#85857d] hover:text-white"><Icon name="close" className="h-3.5 w-3.5" /></button></div>}
       {!capturing && captureError && <div className="border border-[#f07167]/25 bg-[#f07167]/10 px-3 py-2 text-[10px] text-[#f4aca5]">{captureError}</div>}
       {voiceError && <div className="whitespace-pre-line border border-[#f07167]/25 bg-[#f07167]/10 px-3 py-2 text-[10px] leading-relaxed text-[#f4aca5]">{voiceError}</div>}
+      {playbackError && !voiceError && <div className="border border-[#f07167]/25 bg-[#f07167]/10 px-3 py-2 text-[10px] leading-relaxed text-[#f4aca5]">{playbackError}</div>}
     </div>}
     <div className="relative flex items-end gap-1 border border-white/[.13] bg-[#11110f] p-1.5 focus-within:border-[#c8f16b]/55">
       <div className="pb-0.5"><button onClick={(event) => { event.stopPropagation(); setMenuOpen((open) => !open); }} disabled={capturing} title="Tambahkan screenshot" className={`flex h-8 w-8 items-center justify-center ${menuOpen ? "bg-[#c8f16b] text-[#161712]" : "text-[#aaa9a1] hover:bg-white/[.07] hover:text-white"} disabled:opacity-30`}><Icon name="image" className="h-3.5 w-3.5" /></button>{menuOpen && <div onClick={(event) => event.stopPropagation()} className="absolute bottom-full left-0 z-20 mb-2 w-52 border border-white/[.12] bg-[#242421] p-1 shadow-[0_12px_32px_rgba(0,0,0,.38)]"><p className="px-2 py-1.5 text-[9px] font-semibold uppercase tracking-[.14em] text-[#83837b]">Tambahkan konteks layar</p>{OPTIONS.map((option) => <button key={option.mode} onClick={() => { setMenuOpen(false); void attach(option.mode); }} className="flex w-full items-center justify-between px-2 py-2 text-left hover:bg-white/[.06]"><span className="text-[10px] text-[#e4e3dc]">{option.label}</span><span className="text-[9px] text-[#82827a]">{option.detail}</span></button>)}</div>}</div>

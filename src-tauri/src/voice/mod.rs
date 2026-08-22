@@ -160,11 +160,16 @@ pub async fn tts_speak(
     app: AppHandle,
     text: String,
     voice: String,
+    speaker_device: Option<String>,
 ) -> Result<(), String> {
     let text = text.trim().to_string();
     if text.is_empty() {
         return Ok(());
     }
+    playback::ensure_thread(&app);
+    // Feedback instan sebelum sintesis (piper butuh waktu untuk teks panjang).
+    let _ = app.emit("tts-state", json!({ "state": "loading" }));
+
     // Markdown ringan dibuang supaya tidak ikut dibacakan.
     let clean = strip_markdown(&text);
     let app_for_worker = app.clone();
@@ -172,15 +177,47 @@ pub async fn tts_speak(
         tts::synthesize(&app_for_worker, &clean, &voice)
     })
     .await
-    .map_err(|e| format!("Worker TTS gagal: {e}"))??;
+    .map_err(|e| {
+        let msg = format!("Worker TTS gagal: {e}");
+        playback::emit_error(&app, &msg);
+        playback::request_stop(&app);
+        msg
+    })?;
 
-    playback::play(&app, wav);
-    Ok(())
+    match wav {
+        Ok(path) => {
+            playback::play(&app, path, speaker_device);
+            Ok(())
+        }
+        Err(e) => {
+            playback::emit_error(&app, &e);
+            playback::request_stop(&app);
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
 pub fn tts_stop(app: AppHandle) {
-    playback::stop(&app);
+    playback::request_stop(&app);
+}
+
+#[tauri::command]
+pub fn audio_output_devices() -> Result<Vec<String>, String> {
+    let host = cpal::default_host();
+    let mut names = Vec::new();
+    let devices = host
+        .output_devices()
+        .map_err(|e| format!("Gagal enumerasi speaker: {e}"))?;
+    for device in devices {
+        if let Ok(desc) = device.description() {
+            let name = desc.name().to_string();
+            if !name.trim().is_empty() {
+                names.push(name);
+            }
+        }
+    }
+    Ok(names)
 }
 
 fn strip_markdown(text: &str) -> String {
