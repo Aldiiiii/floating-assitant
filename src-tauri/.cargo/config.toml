@@ -1,0 +1,5 @@
+# Env khusus toolchain native Windows MSVC.
+# whisper-rs-sys butuh libclang (bindgen) dan cmake (build whisper.cpp).
+[target.x86_64-pc-windows-msvc.env]
+LIBCLANG_PATH = 'C:\Program Files\LLVM\bin'
+CMAKE = 'C:\Program Files\CMake\bin\cmake.exe'
