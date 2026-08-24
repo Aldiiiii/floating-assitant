@@ -4,7 +4,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 
@@ -97,7 +97,13 @@ impl McpProcess {
             if trimmed.is_empty() {
                 continue;
             }
-            let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+            // Banner/log startup bisa menempel di baris yang sama —
+            // ekstrak mulai karakter '{' pertama.
+            let json_part = match trimmed.find('{') {
+                Some(pos) => &trimmed[pos..],
+                None => continue,
+            };
+            let Ok(value) = serde_json::from_str::<Value>(json_part) else {
                 continue;
             };
             if value.get("id").and_then(Value::as_u64) == Some(expect_id) {
@@ -186,8 +192,8 @@ impl McpProcess {
 }
 
 /// Slot proses MCP yang hidup sepanjang aplikasi (hemat startup Node).
-#[derive(Default)]
-pub struct McpSlot(pub Mutex<Option<(String, McpProcess)>>);
+#[derive(Clone, Default)]
+pub struct McpSlot(Arc<Mutex<Option<(String, McpProcess)>>>);
 
 /// Ambil proses sesuai konfigurasi; restart bila path/node berubah.
 pub fn acquire(slot: &McpSlot, config: &McpConfig) -> Result<(), String> {
@@ -231,7 +237,7 @@ pub fn shutdown(slot: &McpSlot) {
 }
 
 #[tauri::command]
-pub fn mcp_local_check(
+pub async fn mcp_local_check(
     slot: tauri::State<'_, McpSlot>,
     index_path: String,
     node: String,
@@ -240,14 +246,33 @@ pub fn mcp_local_check(
     if cfg.index_path.is_empty() {
         return Err("Path belum diisi.".into());
     }
-    acquire(slot.inner(), &cfg)?;
-    let tools = with_client(slot.inner(), |client| {
-        client.request("tools/list", serde_json::json!({}))
-    })?;
-    let count = tools
-        .get("tools")
-        .and_then(Value::as_array)
-        .map(|a| a.len())
-        .unwrap_or(0);
-    Ok(serde_json::json!({ "tools": count }))
+
+    let task_slot = slot.inner().clone();
+    let task = tauri::async_runtime::spawn_blocking(move || -> Result<usize, String> {
+        acquire(&task_slot, &cfg)?;
+        let tools = with_client(&task_slot, |client| {
+            client.request("tools/list", serde_json::json!({}))
+        })?;
+        Ok(tools
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(|a| a.len())
+            .unwrap_or(0))
+    });
+
+    match tokio::time::timeout(std::time::Duration::from_secs(20), task).await {
+        Ok(Ok(Ok(count))) => Ok(serde_json::json!({ "tools": count })),
+        Ok(Ok(Err(e))) => {
+            shutdown(&slot);
+            Err(e)
+        }
+        Ok(Err(e)) => {
+            shutdown(&slot);
+            Err(format!("Task gagal: {e}"))
+        }
+        Err(_) => {
+            shutdown(&slot);
+            Err("Timeout: server tidak merespons dalam 20 detik.".into())
+        }
+    }
 }

@@ -147,6 +147,7 @@ async fn stream_once(
     has_image: bool,
     gen: &GenerationParams,
     collected: &mut String,
+    suppressed_out: &mut String,
 ) -> Result<(), String> {
     let url = format!("{}/chat/completions", normalize_base(base_url));
     let mut body = serde_json::json!({
@@ -188,6 +189,19 @@ async fn stream_once(
     let mut stream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::new();
 
+    // Supresi: chunk yang membentuk pola tool-call ditahan agar tidak tampil.
+    const TOOL_PATTERNS: [&str; 7] = [
+        "{\"tool\": \"web_search\"",
+        "{\"tool\": \"deep_search\"",
+        "{\"tool\": \"read_page\"",
+        "{\"tool\":\"web_search\"",
+        "{\"tool\":\"deep_search\"",
+        "{\"tool\":\"read_page\"",
+        "[CARI:",
+    ];
+    let mut mode: u8 = 0; // 0=detecting 1=normal 2=suppressed
+    let mut pending = String::new();
+
     loop {
         tokio::select! {
             _ = token.cancelled() => return Ok(()),
@@ -200,15 +214,47 @@ async fn stream_once(
                         match parse_sse_line(line.trim()) {
                             SseLine::Delta(delta) => {
                                 collected.push_str(&delta);
-                                let _ = app.emit("chat-chunk", ChunkPayload { id, delta });
+                                match mode {
+                                    1 => {
+                                        let _ = app.emit("chat-chunk", ChunkPayload { id, delta });
+                                    }
+                                    2 => pending.push_str(&delta),
+                                    _ => {
+                                        pending.push_str(&delta);
+                                        let candidate = pending.trim_start();
+                                        let tool_like = TOOL_PATTERNS.iter().any(|p| {
+                                            p.starts_with(candidate) || candidate.starts_with(p)
+                                        });
+                                        if tool_like {
+                                            mode = 2;
+                                        } else {
+                                            mode = 1;
+                                            let _ = app.emit(
+                                                "chat-chunk",
+                                                ChunkPayload { id, delta: pending.clone() },
+                                            );
+                                            pending.clear();
+                                        }
+                                    }
+                                }
                             }
-                            SseLine::Done => return Ok(()),
+                            SseLine::Done => {
+                                if mode == 2 {
+                                    *suppressed_out = pending.clone();
+                                }
+                                return Ok(());
+                            }
                             SseLine::Ignore => {}
                         }
                     }
                 }
                 Some(Err(e)) => return Err(format!("Koneksi ke AI Server terputus: {e}")),
-                None => return Ok(()),
+                None => {
+                    if mode == 2 {
+                        *suppressed_out = pending.clone();
+                    }
+                    return Ok(());
+                }
             }
         }
     }
@@ -341,6 +387,7 @@ pub async fn chat_stream(
         convo.retain(|m| !matches!(&m.content, serde_json::Value::String(t) if t.trim().is_empty()));
 
         let mut collected = String::new();
+        let mut suppressed = String::new();
         let result = stream_once(
             &app,
             &token,
@@ -351,6 +398,7 @@ pub async fn chat_stream(
             has_image,
             &gen,
             &mut collected,
+            &mut suppressed,
         )
         .await;
 
@@ -379,10 +427,15 @@ pub async fn chat_stream(
         }
 
         // Deteksi tool call: JSON structured (utama) / [CARI:] (fallback).
-        let Some(tool) = (web_search_enabled && iteration < MAX_SEARCH_ITERATIONS)
+        let tool = (web_search_enabled && iteration < MAX_SEARCH_ITERATIONS)
             .then(|| extract_tool_call(&collected))
-            .flatten()
-        else {
+            .flatten();
+
+        let Some(tool) = tool else {
+            // Bukan tool call — bila ada teks yang tertahan supresi, tampilkan.
+            if !suppressed.is_empty() {
+                let _ = app.emit("chat-chunk", ChunkPayload { id, delta: suppressed.clone() });
+            }
             finished_cleanly = true;
             break;
         };
@@ -428,18 +481,24 @@ pub async fn chat_stream(
                 note = n;
 
                 // Snippet sering tidak memuat angka — ambil konten halaman
-                // teratas sebagai pelengkap (best-effort, timeout 8 detik).
-                if let Some(top) = results.first().filter(|top| !top.url.is_empty()) {
-                    let url = top.url.clone();
-                    let fetch = tokio::time::timeout(
-                        std::time::Duration::from_secs(8),
-                        crate::web_search::fetch_page_text_native(&url),
-                    )
-                    .await;
-                    if let Ok(Ok(text)) = fetch {
+                // teratas: via MCP bila tersedia, else native (timeout 8s).
+                if let Some(top_url) =
+                    results.first().map(|r| r.url.clone()).filter(|u| !u.is_empty())
+                {
+                    let fetched = if mcp_ready {
+                        crate::web_search::mcp_read_page(&mcp_slot, &mcp_cfg, &top_url).await
+                    } else {
+                        tokio::time::timeout(
+                            std::time::Duration::from_secs(8),
+                            crate::web_search::fetch_page_text_native(&top_url),
+                        )
+                        .await
+                        .unwrap_or_else(|_| Err("Timeout membaca halaman.".into()))
+                    };
+                    if let Ok(text) = fetched {
                         results.push(crate::web_search::SearchResult {
-                            title: format!("Konten halaman teratas ({})", truncate(&url, 60)),
-                            url,
+                            title: format!("Konten halaman teratas ({})", truncate(&top_url, 60)),
+                            url: top_url,
                             snippet: text,
                         });
                     }
