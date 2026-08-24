@@ -13,6 +13,13 @@
     "size": 488000000,
     "dest": "models/ggml-small.bin"
   },
+  "whisper-medium": {
+    "type": "file",
+    "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
+    "sha256": null,
+    "size": 1530000000,
+    "dest": "models/ggml-medium.bin"
+  },
   "piper-bin-windows": {
     "type": "archive-zip",
     "url": "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip",

@@ -110,6 +110,7 @@ pub async fn voice_stop(
     app: AppHandle,
     state: State<'_, VoiceState>,
     model_key: String,
+    language: String,
 ) -> Result<TranscriptPayload, String> {
     let recorder = {
         let mut guard = state.recorder.lock().map_err(|_| "Voice terkunci.")?;
@@ -132,7 +133,7 @@ pub async fn voice_stop(
                 recording.rate,
             );
             let model_file = model_path(&app_for_worker, &model_key)?;
-            let transcript = stt::transcribe(&pcm, &model_file)?;
+            let transcript = stt::transcribe(&pcm, &model_file, &language)?;
             Ok(TranscriptPayload {
                 text: transcript.text,
                 language: transcript.language,
@@ -161,6 +162,7 @@ pub async fn tts_speak(
     text: String,
     voice: String,
     speaker_device: Option<String>,
+    speed: Option<f32>,
 ) -> Result<(), String> {
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -174,7 +176,7 @@ pub async fn tts_speak(
     let clean = strip_markdown(&text);
     let app_for_worker = app.clone();
     let wav = tauri::async_runtime::spawn_blocking(move || {
-        tts::synthesize(&app_for_worker, &clean, &voice)
+        tts::synthesize(&app_for_worker, &clean, &voice, speed.unwrap_or(1.0))
     })
     .await
     .map_err(|e| {

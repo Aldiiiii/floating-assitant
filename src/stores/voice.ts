@@ -13,7 +13,8 @@ import {
 import { load, type Store } from "@tauri-apps/plugin-store";
 
 export type VoiceMode = "ptt" | "toggle";
-export type SttModel = "whisper-base" | "whisper-small";
+export type SttModel = "whisper-base" | "whisper-small" | "whisper-medium";
+export type SttLanguage = "id" | "en" | "auto";
 export type TtsVoice = "id" | "en";
 
 interface VoiceStateStore {
@@ -22,6 +23,8 @@ interface VoiceStateStore {
   sttModel: SttModel;
   autoSpeak: boolean;
   ttsVoice: TtsVoice;
+  language: SttLanguage;
+  speechSpeed: number;
 
   state: "idle" | "recording" | "transcribing" | "error";
   error: string | null;
@@ -45,6 +48,8 @@ interface VoiceStateStore {
   setSttModel: (m: SttModel) => void;
   setAutoSpeak: (v: boolean) => void;
   setTtsVoice: (v: TtsVoice) => void;
+  setLanguage: (l: SttLanguage) => void;
+  setSpeechSpeed: (v: number) => void;
 
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<{ text: string; language: string } | null>;
@@ -106,6 +111,8 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
   sttModel: "whisper-base",
   autoSpeak: false,
   ttsVoice: "id",
+  language: "id",
+  speechSpeed: 1,
 
   state: "idle",
   error: null,
@@ -168,7 +175,9 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
     const ttsVoice = (await store.get<TtsVoice>("voice.ttsVoice")) ?? "id";
     const micDevice = (await store.get<string | null>("voice.micDevice")) ?? null;
     const speakerDevice = (await store.get<string | null>("voice.speakerDevice")) ?? null;
-    set({ micEnabled, mode, sttModel, autoSpeak, ttsVoice, micDevice, speakerDevice });
+    const language = (await store.get<SttLanguage>("voice.language")) ?? "id";
+    const speechSpeed = (await store.get<number>("voice.speechSpeed")) ?? 1;
+    set({ micEnabled, mode, sttModel, autoSpeak, ttsVoice, micDevice, speakerDevice, language, speechSpeed });
     void get().loadDevices();
     void get().loadOutputDevices();
   },
@@ -193,6 +202,14 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
     set({ ttsVoice: v });
     void persist("voice.ttsVoice", v);
   },
+  setLanguage: (l) => {
+    set({ language: l });
+    void persist("voice.language", l);
+  },
+  setSpeechSpeed: (v) => {
+    set({ speechSpeed: v });
+    void persist("voice.speechSpeed", v);
+  },
 
   startRecording: async () => {
     const s = get();
@@ -216,7 +233,7 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
     const s = get();
     if (s.state !== "recording") return null;
     try {
-      const payload = await voiceStop(s.sttModel);
+      const payload = await voiceStop(s.sttModel, s.language);
       return { text: payload.text, language: payload.language };
     } finally {
       // voice-state idle/error ditangani listener event.
@@ -228,7 +245,7 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
     if (clean === "") return;
     set({ speaking: true, playbackError: null });
     try {
-      await ttsSpeak(clean, get().ttsVoice, get().speakerDevice);
+      await ttsSpeak(clean, get().ttsVoice, get().speakerDevice, get().speechSpeed);
     } catch (e) {
       const msg = String(e);
       set({ speaking: false, playbackError: msg });

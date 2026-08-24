@@ -57,10 +57,14 @@ fn detected_language(lang_id: i32) -> String {
 }
 
 /// Transkripsi PCM 16 kHz mono. Bahasa dideteksi otomatis (ID/EN).
-pub fn transcribe(pcm_16k: &[f32], model_path: &Path) -> Result<Transcript, String> {
-    // < 100 ms audio hampir pasti tidak berisi ucapan.
-    if pcm_16k.len() < 1_600 {
-        return Err("Audio terlalu pendek untuk ditranskripsi.\n\nTahan tombol 🎤 \
+pub fn transcribe(
+    pcm_16k: &[f32],
+    model_path: &Path,
+    language: &str,
+) -> Result<Transcript, String> {
+    // < 500 ms audio hampir pasti tidak berisi ucapan yang bisa dikenali.
+    if pcm_16k.len() < 8_000 {
+        return Err("Audio terlalu pendek untuk ditranskripsi.\n\nTahan tombol mic \
              sedikit lebih lama saat berbicara."
             .to_string());
     }
@@ -70,8 +74,22 @@ pub fn transcribe(pcm_16k: &[f32], model_path: &Path) -> Result<Transcript, Stri
         .create_state()
         .map_err(|e| format!("Gagal menyiapkan Whisper state: {e}"))?;
 
+    let pinned = match language {
+        "id" | "en" => language,
+        _ => "auto",
+    };
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    params.set_language(Some("auto"));
+    params.set_language(Some(pinned));
+    // Bias decoding ke kosakata bahasa utama (membantu frasa campuran ID+EN).
+    match pinned {
+        "id" => params.set_initial_prompt(
+            "Berikut adalah transkripsi percakapan bahasa Indonesia sehari-hari.",
+        ),
+        "en" => params.set_initial_prompt(
+            "The following is a transcription of everyday English conversation.",
+        ),
+        _ => {}
+    }
     params.set_translate(false);
     params.set_no_context(true);
     params.set_print_special(false);

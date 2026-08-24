@@ -36,6 +36,7 @@ const SECTIONS: { title: string; icon: IconName; items: string[] }[] = [
     items: [
       "Tombol mic di kolom pesan: tahan untuk bicara (push-to-talk) atau klik untuk mulai/berhenti, tergantung mode di Pengaturan.",
       "Hasil pengenalan suara masuk ke kolom pesan dulu — kamu bisa menyuntingnya sebelum dikirim.",
+      "Bahasa utama (Indonesia / English / Otomatis) dan model pengenalan suara dipilih di Pengaturan → Voice.",
       "Tombol Bacakan pada pesan assistant membacakan jawaban; Auto-speak membacakan otomatis.",
       "Unduh model suara (Whisper & Piper) dari Pengaturan → Voice. Semuanya diproses lokal.",
     ],

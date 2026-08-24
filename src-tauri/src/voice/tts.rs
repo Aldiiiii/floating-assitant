@@ -53,7 +53,12 @@ pub fn resolve(app: &AppHandle, key: &str) -> Result<PiperSetup, String> {
 }
 
 /// Jalankan piper: teks via stdin, hasil WAV di folder cache.
-pub fn synthesize(app: &AppHandle, text: &str, key: &str) -> Result<PathBuf, String> {
+pub fn synthesize(
+    app: &AppHandle,
+    text: &str,
+    key: &str,
+    speed: f32,
+) -> Result<PathBuf, String> {
     let setup = resolve(app, key)?;
     paths::ensure_dir(&paths::cache_dir(app))?;
 
@@ -70,6 +75,10 @@ pub fn synthesize(app: &AppHandle, text: &str, key: &str) -> Result<PathBuf, Str
         .arg(&setup.config)
         .arg("--output_file")
         .arg(&out)
+        .arg("--length_scale")
+        .arg(format!("{:.2}", 1.0 / speed.clamp(0.5, 2.0)))
+        .arg("--sentence_silence")
+        .arg("0.25")
         .stdin(Stdio::piped())
         // Log piper dibuang, tapi tetap ditampung agar bisa dilaporkan saat gagal.
         .stdout(Stdio::piped())
