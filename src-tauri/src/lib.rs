@@ -8,8 +8,10 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 
 mod llm;
 mod lm;
+mod mcp_client;
 mod platform;
 mod screenshot;
+mod secrets;
 mod voice;
 mod web_search;
 mod window_shape;
@@ -37,6 +39,12 @@ const MIGRATIONS: &[Migration] = &[
             created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
         CREATE INDEX idx_messages_conversation ON messages(conversation_id);",
+        kind: MigrationKind::Up,
+    },
+    Migration {
+        version: 3,
+        description: "add_message_sources",
+        sql: "ALTER TABLE messages ADD COLUMN sources TEXT;",
         kind: MigrationKind::Up,
     },
 ];
@@ -93,6 +101,7 @@ pub fn run() {
         .manage(screenshot::AreaSelectionState::default())
         .manage(voice::VoiceState::default())
         .manage(voice::models::DownloadRegistry::default())
+        .manage(mcp_client::McpSlot::default())
         .invoke_handler(tauri::generate_handler![
             lm::lm_list_models,
             llm::chat_stream,
@@ -111,7 +120,10 @@ pub fn run() {
             voice::tts_stop,
             voice::audio_output_devices,
             voice::model_status,
-            voice::model_download
+            voice::model_download,
+            mcp_client::mcp_local_check,
+            secrets::search_keys_get,
+            secrets::search_keys_set
         ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Tampilkan", true, None::<&str>)?;
@@ -158,6 +170,11 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                mcp_client::shutdown(&app.state::<mcp_client::McpSlot>());
+            }
+        });
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { modelStatus } from "../lib/api";
+import { mcpLocalCheck, modelStatus, searchKeysGet, searchKeysSet } from "../lib/api";
 import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
 import { useVoiceStore, type SttLanguage, type SttModel, type TtsVoice, type VoiceMode } from "../stores/voice";
@@ -89,9 +89,30 @@ function VoiceSection() {
   </div></section>;
 }
 
+function KeyField({ account, label, placeholder }: { account: string; label: string; placeholder: string }) {
+  const [value, setValue] = useState("");
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    void searchKeysGet().then((keys) => {
+      if (account === "brave-api-key") setValue(keys.brave ?? "");
+      else setValue(keys.tavily ?? "");
+    });
+  }, [account]);
+
+  return <div>
+    <label className="block text-[10px] font-medium text-slate-400">{label}</label>
+    <div className="mt-1 flex gap-2">
+      <input type="password" value={value} onChange={(event) => setValue(event.target.value)} placeholder={placeholder} spellCheck={false} className="min-w-0 flex-1 rounded-xl border border-white/[.08] bg-white/[.04] px-3 py-2 text-[11px] text-white outline-none focus:border-indigo-300/50" />
+      <button onClick={() => { void searchKeysSet(account === "brave-api-key" ? value || null : null, account === "tavily-api-key" ? value || null : null).then(() => { setSaved(true); setTimeout(() => setSaved(false), 1500); }); }} className={`shrink-0 rounded-xl px-3 text-[10px] font-semibold ${saved ? "bg-emerald-400/15 text-emerald-200" : "bg-white/[.07] text-slate-200 hover:bg-white/[.12]"}`}>{saved ? "✓" : "Simpan"}</button>
+    </div>
+  </div>;
+}
+
 function GenerationSection() {
   const systemPrompt = useSettingsStore((s) => s.systemPrompt); const setSystemPrompt = useSettingsStore((s) => s.setSystemPrompt); const resetSystemPrompt = useSettingsStore((s) => s.resetSystemPrompt);
   const temperature = useSettingsStore((s) => s.temperature); const topP = useSettingsStore((s) => s.topP); const maxTokens = useSettingsStore((s) => s.maxTokens); const setGeneration = useSettingsStore((s) => s.setGeneration);
+  const genPreset = useSettingsStore((s) => s.genPreset); const setGenPreset = useSettingsStore((s) => s.setGenPreset);
+  const contextTokens = useSettingsStore((s) => s.contextTokens); const setContextTokens = useSettingsStore((s) => s.setContextTokens);
 
   const sliders: { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void }[] = [
     { label: "Temperature", value: temperature, min: 0, max: 1.5, step: 0.05, onChange: (v) => setGeneration({ temperature: v }) },
@@ -99,19 +120,35 @@ function GenerationSection() {
   ];
 
   return <section className="mt-5"><p className="mb-2 text-[9px] font-semibold uppercase tracking-[.16em] text-indigo-200">Gaya jawaban</p><div className="space-y-2 rounded-2xl border border-white/[.07] bg-[#0b0f1e]/45 p-3">
+    <div className="grid grid-cols-4 gap-1.5">{([["presisi", "Presisi"], ["seimbang", "Seimbang"], ["kreatif", "Kreatif"], ["kustom", "Kustom"]] as const).map(([value, label]) => <button key={value} onClick={() => setGenPreset(value)} className={`rounded-lg px-2 py-1.5 text-[10px] font-medium transition-colors ${genPreset === value ? "bg-[#c8f16b] text-[#161712]" : "bg-white/[.05] text-slate-300 hover:bg-white/[.1]"}`}>{label}</button>)}</div>
+    {genPreset === "kustom" && <>
     <div className="flex items-center justify-between"><p className="text-[10px] font-medium text-slate-400">System prompt</p><button onClick={resetSystemPrompt} title="Kembalikan ke bawaan" className="flex items-center gap-1 rounded-lg bg-white/[.06] px-2 py-1 text-[9px] text-slate-300 hover:bg-white/[.12]"><Icon name="refresh" className="h-3 w-3" />Reset</button></div>
     <textarea value={systemPrompt} onChange={(event) => setSystemPrompt(event.target.value)} rows={6} spellCheck={false} className="w-full resize-y rounded-xl border border-white/[.08] bg-white/[.04] px-3 py-2 text-[11px] leading-relaxed text-white outline-none focus:border-indigo-300/50" />
     {sliders.map((slider) => <div key={slider.label}><div className="flex items-center justify-between"><p className="text-[10px] font-medium text-slate-400">{slider.label}</p><span className="text-[10px] tabular-nums text-[#c8f16b]">{slider.value.toFixed(2)}</span></div><input type="range" min={slider.min} max={slider.max} step={slider.step} value={slider.value} onChange={(event) => slider.onChange(Number(event.target.value))} className="mt-1 w-full accent-[#c8f16b]" /></div>)}
-    <div className="flex items-center justify-between gap-3 pt-1"><p className="text-[10px] font-medium text-slate-400">Max tokens</p><input type="number" min={128} max={8192} step={64} value={maxTokens} onChange={(event) => setGeneration({ maxTokens: Math.max(128, Math.min(8192, Number(event.target.value) || 1024)) })} className="w-24 rounded-lg border border-white/[.08] bg-white/[.04] px-2 py-1.5 text-right text-[11px] tabular-nums text-white outline-none focus:border-indigo-300/50" /></div>
-    <p className="text-[9px] leading-relaxed text-slate-600">Nilai ini dikirim ke LM Studio pada setiap permintaan.</p>
+    </>}
+    <div className="flex items-center justify-between gap-3 pt-1"><p className="text-[10px] font-medium text-slate-400">Ukuran konteks model (token)</p><div className="flex gap-1">{[2048, 4096, 8192, 16384, 32768].map((size) => <button key={size} onClick={() => setContextTokens(size)} className={`rounded-lg px-2 py-1 text-[9px] font-semibold transition-colors ${contextTokens === size ? "bg-[#c8f16b] text-[#161712]" : "bg-white/[.05] text-slate-300 hover:bg-white/[.1]"}`}>{size >= 1024 ? `${size / 1024}k` : size}</button>)}</div></div>
+    <div className="flex items-center justify-between gap-3 pt-1"><p className="text-[10px] font-medium text-slate-400">Max tokens respons</p><input type="number" min={128} max={8192} step={64} value={maxTokens} onChange={(event) => setGeneration({ maxTokens: Math.max(128, Math.min(8192, Number(event.target.value) || 1024)) })} className="w-24 rounded-lg border border-white/[.08] bg-white/[.04] px-2 py-1.5 text-right text-[11px] tabular-nums text-white outline-none focus:border-indigo-300/50" /></div>
   </div></section>;
 }
 
 function WebSearchSection() {
   const enabled = useSettingsStore((s) => s.webSearchEnabled); const setEnabled = useSettingsStore((s) => s.setWebSearchEnabled);
   const provider = useSettingsStore((s) => s.searchProvider); const setProvider = useSettingsStore((s) => s.setSearchProvider);
-  const braveKey = useSettingsStore((s) => s.braveKey); const setBraveKey = useSettingsStore((s) => s.setBraveKey);
-  const tavilyKey = useSettingsStore((s) => s.tavilyKey); const setTavilyKey = useSettingsStore((s) => s.setTavilyKey);
+
+  const mcpIndexPath = useSettingsStore((s) => s.mcpIndexPath);
+  const mcpNode = useSettingsStore((s) => s.mcpNode);
+  const mcpFullContent = useSettingsStore((s) => s.mcpFullContent);
+  const setMcpConfig = useSettingsStore((s) => s.setMcpConfig);
+  const [mcpChecking, setMcpChecking] = useState(false);
+  const [mcpStatus, setMcpStatus] = useState<string | null>(null);
+
+  const checkMcp = () => {
+    if (!mcpIndexPath.trim()) { setMcpStatus("Path belum diisi."); return; }
+    setMcpChecking(true); setMcpStatus(null);
+    void mcpLocalCheck(mcpIndexPath.trim(), mcpNode.trim() || "node")
+      .then((res) => setMcpStatus(`OK · ${res.tools} tool tersedia`))
+      .catch((e) => setMcpStatus(String(e)));
+  };
 
   const providers: { key: "ddg" | "brave" | "tavily"; label: string; detail: string }[] = [
     { key: "ddg", label: "DuckDuckGo", detail: "Tanpa key · kadang diblokir ISP" },
@@ -121,12 +158,23 @@ function WebSearchSection() {
 
   return <section className="mt-5"><p className="mb-2 text-[9px] font-semibold uppercase tracking-[.16em] text-indigo-200">Pencarian web</p><div className="space-y-2 rounded-2xl border border-white/[.07] bg-[#0b0f1e]/45 p-3">
     <SettingRow title="Izinkan pencarian web" description="Model dapat meminta data terbaru via [CARI:]. Nonaktif = sepenuhnya offline." checked={enabled} onChange={setEnabled} />
+    <div className="rounded-xl border border-white/[.06] bg-white/[.025] px-3 py-3">
+      <div className="flex items-center justify-between"><p className="text-[11px] font-medium text-slate-200">Web Search MCP (Lokal)</p><button onClick={checkMcp} disabled={mcpChecking} title="Cek kesehatan server" className="rounded-lg bg-white/[.07] px-2 py-1 text-[9px] font-semibold text-slate-200 hover:bg-white/[.12] disabled:opacity-40">{mcpChecking ? "Memeriksa…" : "Cek"}</button></div>
+      <p className="mb-2 mt-1 text-[9px] leading-relaxed text-slate-500">Prioritas tertinggi saat terpasang — Bing/Brave/DDG + konten halaman. Butuh Node.js &amp; setup awal (docs/mcp-setup.md).</p>
+      <input value={mcpIndexPath} onChange={(event) => setMcpConfig({ path: event.target.value })} placeholder="…/web-search-mcp/dist/index.js" spellCheck={false} className="w-full rounded-lg border border-white/[.08] bg-white/[.04] px-2.5 py-2 text-[10px] text-white outline-none focus:border-indigo-300/50" />
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <input value={mcpNode} onChange={(event) => setMcpConfig({ node: event.target.value })} placeholder="node" spellCheck={false} className="w-28 rounded-lg border border-white/[.08] bg-white/[.04] px-2.5 py-1.5 text-[10px] text-white outline-none focus:border-indigo-300/50" />
+        <Toggle checked={mcpFullContent} onChange={(v) => setMcpConfig({ full: v })} />
+      </div>
+      <p className="mt-1 text-[9px] text-slate-500">Toggle: konten halaman penuh pada deep_search</p>
+      {mcpStatus && <p className={`mt-2 text-[9px] leading-relaxed ${mcpStatus.startsWith("OK") ? "text-emerald-300" : "text-[#f4aca5]"}`}>{mcpStatus}</p>}
+    </div>
     <div className={`grid grid-cols-3 gap-1.5 transition-opacity ${enabled ? "" : "pointer-events-none opacity-40"}`}>
       {providers.map((item) => <button key={item.key} onClick={() => setProvider(item.key)} className={`rounded-lg px-2 py-2 text-left transition-colors ${provider === item.key ? "bg-[#c8f16b]/[.12] ring-1 ring-[#c8f16b]/50" : "bg-white/[.05] hover:bg-white/[.1]"}`}><p className={`text-[10px] font-medium ${provider === item.key ? "text-[#dbff8c]" : "text-slate-300"}`}>{item.label}</p><p className="text-[9px] text-slate-500">{item.detail}</p></button>)}
     </div>
-    {enabled && provider === "brave" && <div><label className="block text-[10px] font-medium text-slate-400">Brave API key</label><input type="password" value={braveKey} onChange={(event) => setBraveKey(event.target.value)} placeholder="brv-…" spellCheck={false} className="mt-1 w-full rounded-xl border border-white/[.08] bg-white/[.04] px-3 py-2 text-[11px] text-white outline-none focus:border-indigo-300/50" /></div>}
-    {enabled && provider === "tavily" && <div><label className="block text-[10px] font-medium text-slate-400">Tavily API key</label><input type="password" value={tavilyKey} onChange={(event) => setTavilyKey(event.target.value)} placeholder="tvly-…" spellCheck={false} className="mt-1 w-full rounded-xl border border-white/[.08] bg-white/[.04] px-3 py-2 text-[11px] text-white outline-none focus:border-indigo-300/50" /></div>}
-    <p className="text-[9px] leading-relaxed text-slate-600"><Icon name="shield" className="mr-1 inline h-3 w-3 -translate-y-px" />Query dikirim hanya ke penyedia yang kamu pilih. Key tersimpan lokal.</p>
+    {enabled && provider === "brave" && <KeyField account="brave-api-key" label="Brave API key" placeholder="brv-…" />}
+    {enabled && provider === "tavily" && <KeyField account="tavily-api-key" label="Tavily API key" placeholder="tvly-…" />}
+    <p className="text-[9px] leading-relaxed text-slate-600"><Icon name="shield" className="mr-1 inline h-3 w-3 -translate-y-px" />API key disimpan di OS keychain (Credential Manager / Secret Service), bukan plaintext.</p>
   </div></section>;
 }
 

@@ -47,6 +47,24 @@ export function setWindowShape(radius: number): Promise<void> {
   return invoke("set_window_shape", { radius });
 }
 
+export function searchKeysGet(): Promise<{ brave: string | null; tavily: string | null }> {
+  return invoke("search_keys_get");
+}
+
+export function searchKeysSet(
+  brave: string | null,
+  tavily: string | null,
+): Promise<void> {
+  return invoke("search_keys_set", { brave, tavily });
+}
+
+export function mcpLocalCheck(
+  indexPath: string,
+  node: string,
+): Promise<{ tools: number }> {
+  return invoke("mcp_local_check", { indexPath, node });
+}
+
 export interface GenerationOptions {
   systemPrompt?: string | null;
   temperature?: number;
@@ -54,7 +72,6 @@ export interface GenerationOptions {
   maxTokens?: number;
   webSearchEnabled?: boolean;
   searchProvider?: string;
-  searchApiKey?: string | null;
 }
 
 export async function chatStream(
@@ -70,7 +87,6 @@ export async function chatStream(
     ...args,
     systemPrompt: args.systemPrompt ?? null,
     searchProvider: args.searchProvider ?? "ddg",
-    searchApiKey: args.searchApiKey ?? null,
   });
 }
 

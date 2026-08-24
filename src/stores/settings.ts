@@ -10,12 +10,19 @@ export const DEFAULT_BASE_URL = "http://localhost:1234/v1";
 export const DEFAULT_SYSTEM_PROMPT = `Kamu adalah Astra, asisten AI pribadi yang berjalan lokal di perangkat pengguna.
 
 Gaya menjawab:
-- Bahasa utama: Indonesia yang natural dan mudah dipahami.
+- Bahasa utama mengikuti bahasa pengguna (utamanya Indonesia yang natural).
 - Ringkas, padat, langsung ke inti. Hindari basa-basi dan pengulangan pertanyaan.
-- Gunakan Markdown: poin bernomor untuk langkah-langkah, tabel bila membandingkan, dan code block dengan bahasa yang benar untuk kode.
-- Untuk pertanyaan teknis/pemrograman: berikan contoh kode yang bisa dijalankan.
-- Jika informasi tidak cukup atau kamu tidak yakin, katakan terus terang.
-- Kamu memiliki tool pencarian web: jika butuh data terbaru (harga, berita, cuaca, jadwal), balas HANYA satu baris berformat [CARI: kata kunci] tanpa teks lain. Selain itu, jawab langsung.`;
+- Gunakan Markdown: langkah bernomor untuk langkah-langkah, tabel bila membandingkan, code block dengan bahasa yang benar untuk kode.
+- Pertanyaan teknis/pemrograman: sertakan contoh kode yang bisa dijalankan.
+- Jika tidak yakin atau data tidak cukup, katakan terus terang.
+
+Tool pencarian web — jika butuh data terbaru/realtime, balas HANYA satu objek JSON tanpa teks lain:
+{"tool": "web_search", "arguments": {"query": "kata kunci"}}
+Untuk butuh isi lengkap halaman gunakan:
+{"tool": "deep_search", "arguments": {"query": "kata kunci"}}
+Untuk membaca URL spesifik gunakan:
+{"tool": "read_page", "arguments": {"url": "https://..."}}
+Hasil pencarian akan diberikan padamu untuk dirangkum menjadi jawaban. Sebutkan sumber dengan [1], [2] saat mengutip.`;
 
 let storePromise: Promise<Store> | null = null;
 
@@ -39,17 +46,21 @@ interface SettingsState {
   maxTokens: number;
   webSearchEnabled: boolean;
   searchProvider: "ddg" | "brave" | "tavily";
-  braveKey: string;
-  tavilyKey: string;
+  genPreset: "presisi" | "seimbang" | "kreatif" | "kustom";
+  contextTokens: number;
+  mcpIndexPath: string;
+  mcpNode: string;
+  mcpFullContent: boolean;
 
   init: () => Promise<void>;
+  setGenPreset: (v: "presisi" | "seimbang" | "kreatif" | "kustom") => void;
+  setContextTokens: (v: number) => void;
+  setMcpConfig: (patch: { path?: string; node?: string; full?: boolean }) => void;
   setSystemPrompt: (v: string) => void;
   resetSystemPrompt: () => void;
   setGeneration: (patch: { temperature?: number; topP?: number; maxTokens?: number }) => void;
   setWebSearchEnabled: (v: boolean) => void;
   setSearchProvider: (v: "ddg" | "brave" | "tavily") => void;
-  setBraveKey: (v: string) => void;
-  setTavilyKey: (v: string) => void;
   setBaseUrl: (url: string) => void;
   setModel: (model: string) => void;
   testConnection: () => Promise<void>;
@@ -74,8 +85,37 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   maxTokens: 1024,
   webSearchEnabled: true,
   searchProvider: "ddg" as const,
-  braveKey: "",
-  tavilyKey: "",
+  genPreset: "seimbang" as const,
+  contextTokens: 4096,
+  mcpIndexPath: "",
+  mcpNode: "node",
+  mcpFullContent: false,
+
+  setGenPreset: (v) => {
+    set({ genPreset: v });
+    if (v === "presisi") get().setGeneration({ temperature: 0.2 });
+    if (v === "seimbang") get().setGeneration({ temperature: 0.7 });
+    if (v === "kreatif") get().setGeneration({ temperature: 1.0 });
+    // kustom: nilai saat ini dipertahankan
+    void (async () => (await getStore()).set("ai.genPreset", v))();
+  },
+  setContextTokens: (v) => {
+    set({ contextTokens: v });
+    void (async () => (await getStore()).set("ai.contextTokens", v))();
+  },
+  setMcpConfig: (patch) => {
+    set((st) => ({
+      mcpIndexPath: patch.path ?? st.mcpIndexPath,
+      mcpNode: patch.node ?? st.mcpNode,
+      mcpFullContent: patch.full ?? st.mcpFullContent,
+    }));
+    void (async () => {
+      const store = await getStore();
+      if (patch.path !== undefined) await store.set("web.mcpIndexPath", patch.path);
+      if (patch.node !== undefined) await store.set("web.mcpNode", patch.node);
+      if (patch.full !== undefined) await store.set("web.mcpFullContent", patch.full);
+    })();
+  },
 
   setSystemPrompt: (v) => {
     set({ systemPrompt: v });
@@ -99,14 +139,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ searchProvider: v });
     void (async () => (await getStore()).set("web.provider", v))();
   },
-  setBraveKey: (v) => {
-    set({ braveKey: v });
-    void (async () => (await getStore()).set("web.braveKey", v))();
-  },
-  setTavilyKey: (v) => {
-    set({ tavilyKey: v });
-    void (async () => (await getStore()).set("web.tavilyKey", v))();
-  },
 
   init: async () => {
     const store = await getStore();
@@ -120,13 +152,35 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const maxTokens = (await store.get<number>("ai.maxTokens")) ?? 1024;
     const webSearchEnabled = (await store.get<boolean>("web.enabled")) ?? true;
     const searchProvider = (await store.get<"ddg"|"brave"|"tavily">("web.provider")) ?? "ddg";
-    const braveKey = (await store.get<string>("web.braveKey")) ?? "";
-    const tavilyKey = (await store.get<string>("web.tavilyKey")) ?? "";
+    const genPreset = ((await store.get<string>("ai.genPreset")) ?? "seimbang") as SettingsState["genPreset"];
+    const contextTokens = (await store.get<number>("ai.contextTokens")) ?? 4096;
+    const mcpIndexPath = (await store.get<string>("web.mcpIndexPath")) ?? "";
+    const mcpNode = (await store.get<string>("web.mcpNode")) ?? "node";
+    const mcpFullContent = (await store.get<boolean>("web.mcpFullContent")) ?? false;
+
+    // Migrasi API key lama (plaintext) -> OS keychain sekali jalan.
+    const legacyBrave = await store.get<string>("web.braveKey");
+    const legacyTavily = await store.get<string>("web.tavilyKey");
+    if ((legacyBrave && legacyBrave.trim()) || (legacyTavily && legacyTavily.trim())) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("search_keys_set", {
+          brave: legacyBrave?.trim() || null,
+          tavily: legacyTavily?.trim() || null,
+        });
+        await store.set("web.braveKey", "");
+        await store.set("web.tavilyKey", "");
+      } catch { /* keychain gagal — key tetap ada di json */ }
+    }
 
     if (!alwaysOnTop) {
       await getCurrentWindow().setAlwaysOnTop(false).catch(() => undefined);
     }
-    set({ baseUrl, model, alwaysOnTop, startMinimized, systemPrompt, temperature, topP, maxTokens, webSearchEnabled, searchProvider, braveKey, tavilyKey, ready: true });
+    set({
+      baseUrl, model, alwaysOnTop, startMinimized, systemPrompt, temperature, topP, maxTokens,
+      webSearchEnabled, searchProvider, genPreset, contextTokens,
+      mcpIndexPath, mcpNode, mcpFullContent, ready: true,
+    });
     void get().testConnection();
   },
 

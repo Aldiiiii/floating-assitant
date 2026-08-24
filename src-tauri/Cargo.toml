@@ -38,6 +38,7 @@ zip = "8.6.0"
 flate2 = "1.1.9"
 tar = "0.4.46"
 scraper = "0.27.0"
+keyring = { version = "3", features = ["windows-native", "sync-secret-service"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

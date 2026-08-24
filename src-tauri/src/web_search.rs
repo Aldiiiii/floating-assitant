@@ -2,6 +2,8 @@
 //! Provider: DuckDuckGo Lite (tanpa key), Brave Search, Tavily.
 
 use serde::{Deserialize, Serialize};
+use crate::mcp_client::{self, McpConfig, McpSlot};
+use crate::secrets;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SearchResult {
@@ -115,7 +117,14 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-async fn brave_search(query: &str, key: &str) -> Result<Vec<SearchResult>, String> {
+async fn brave_search(query: &str) -> Result<Vec<SearchResult>, String> {
+    let Some(key) = secrets::get("brave-api-key").filter(|k| !k.trim().is_empty()) else {
+        return Err(
+            "API key Brave belum diisi.
+
+Isi di Pengaturan → Pencarian Web.".into(),
+        );
+    };
     #[derive(Deserialize)]
     struct BraveResp {
         web: Option<BraveWeb>,
@@ -160,7 +169,14 @@ async fn brave_search(query: &str, key: &str) -> Result<Vec<SearchResult>, Strin
         .unwrap_or_default())
 }
 
-async fn tavily_search(query: &str, key: &str) -> Result<Vec<SearchResult>, String> {
+async fn tavily_search(query: &str) -> Result<Vec<SearchResult>, String> {
+    let Some(key) = secrets::get("tavily-api-key").filter(|k| !k.trim().is_empty()) else {
+        return Err(
+            "API key Tavily belum diisi.
+
+Isi di Pengaturan → Pencarian Web.".into(),
+        );
+    };
     #[derive(Deserialize)]
     struct TavilyResp {
         #[serde(default)]
@@ -202,32 +218,225 @@ async fn tavily_search(query: &str, key: &str) -> Result<Vec<SearchResult>, Stri
         .collect())
 }
 
+#[derive(Clone, Default)]
+pub struct SearchContext<'a> {
+    pub provider: &'a str,
+    pub mcp_index_path: Option<&'a str>,
+    pub mcp_node: Option<&'a str>,
+    /// Sertakan konten halaman penuh pada deep search MCP.
+    pub mcp_full_content: bool,
+}
+
+impl<'a> SearchContext<'a> {
+    pub fn mcp_config(&self) -> Option<McpConfig> {
+        let path = self.mcp_index_path.map(str::trim).filter(|p| !p.is_empty())?;
+        Some(McpConfig {
+            index_path: path.to_string(),
+            node: self
+                .mcp_node
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .unwrap_or("node")
+                .to_string(),
+        })
+    }
+}
+
+async fn mcp_summaries(
+    slot: &McpSlot,
+    cfg: &McpConfig,
+    query: &str,
+) -> Result<Vec<SearchResult>, String> {
+    mcp_client::acquire(slot, cfg)?;
+    let text = mcp_client::with_client(slot, |client| {
+        client.call_tool(
+            "get-web-search-summaries",
+            serde_json::json!({ "query": query, "limit": 5 }),
+        )
+    })?;
+    Ok(parse_mcp_results(&text))
+}
+
+pub async fn mcp_deep_search(
+    slot: &McpSlot,
+    cfg: &McpConfig,
+    query: &str,
+) -> Result<Vec<SearchResult>, String> {
+    mcp_client::acquire(slot, cfg)?;
+    let text = mcp_client::with_client(slot, |client| {
+        client.call_tool(
+            "full-web-search",
+            serde_json::json!({
+                "query": query,
+                "limit": 3,
+                "includeContent": true
+            }),
+        )
+    })?;
+
+    let mut results = parse_mcp_results(&text);
+    // Bila server mengembalikan konten terpisah, gabungkan ke snippet.
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+        if let Some(items) = value.get("results").and_then(serde_json::Value::as_array) {
+            results.clear();
+            for item in items {
+                results.push(SearchResult {
+                    title: item.get("title").and_then(serde_json::Value::as_str).unwrap_or("Hasil").to_string(),
+                    url: item.get("url").and_then(serde_json::Value::as_str).unwrap_or("").to_string(),
+                    snippet: clean_text(
+                        item.get("content")
+                            .or_else(|| item.get("description"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(""),
+                    ),
+                });
+            }
+        }
+    }
+    Ok(results)
+}
+
+pub async fn mcp_read_page(
+    slot: &McpSlot,
+    cfg: &McpConfig,
+    url: &str,
+) -> Result<String, String> {
+    mcp_client::acquire(slot, cfg)?;
+    let text = mcp_client::with_client(slot, |client| {
+        client.call_tool(
+            "get-single-web-page-content",
+            serde_json::json!({ "url": url }),
+        )
+    })?;
+    Ok(truncate_text(&text, 12_000))
+}
+
+/// Baca halaman secara native tanpa MCP (fallback ringan).
+pub async fn fetch_page_text_native(url: &str) -> Result<String, String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("URL tidak valid.".into());
+    }
+    let html = client()?
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Gagal membuka halaman: {e}"))?
+        .text()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let document = scraper::Html::parse_document(&html);
+    let content_sel =
+        scraper::Selector::parse("h1,h2,h3,p,li,pre,code,blockquote").unwrap();
+    let mut parts: Vec<String> = Vec::new();
+    for el in document.select(&content_sel) {
+        let text = clean_text(&el.text().collect::<String>());
+        if text.len() > 2 {
+            parts.push(text);
+        }
+    }
+    let joined = parts.join("
+");
+    if joined.trim().is_empty() {
+        return Err("Halaman tidak berisi teks yang bisa dibaca.".into());
+    }
+    Ok(truncate_text(&joined, 12_000))
+}
+
+fn truncate_text(s: &str, max_chars: usize) -> String {
+    if s.len() <= max_chars {
+        s.to_string()
+    } else {
+        let mut end = max_chars;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &s[..end])
+    }
+}
+
+/// Parser lenien untuk keluaran tools web-search-mcp:
+/// coba JSON terstruktur dulu, bila gagal perlakukan seluruh teks sebagai satu hasil.
+fn parse_mcp_results(text: &str) -> Vec<SearchResult> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+        let arr = value
+            .get("results")
+            .or_else(|| value.get("searchResults"))
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .or_else(|| {
+                value.as_array().cloned()
+            });
+        if let Some(items) = arr {
+            let parsed: Vec<SearchResult> = items
+                .iter()
+                .filter_map(|item| {
+                    Some(SearchResult {
+                        title: item
+                            .get("title")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("Hasil")
+                            .to_string(),
+                        url: item
+                            .get("url")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                        snippet: clean_text(
+                            item.get("snippet")
+                                .or_else(|| item.get("description"))
+                                .or_else(|| item.get("content"))
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or(""),
+                        ),
+                    })
+                })
+                .filter(|r| !r.url.is_empty())
+                .collect();
+            if !parsed.is_empty() {
+                return parsed;
+            }
+        }
+    }
+    vec![SearchResult {
+        title: "Hasil pencarian".into(),
+        url: String::new(),
+        snippet: truncate_text(text, 4_000),
+    }]
+}
+
 /// Coba provider terpilih lalu fallback ke provider lain bila gagal
 /// (kecuali yang membutuhkan key namun key kosong).
 pub async fn search_with_fallback(
-    provider: &str,
-    api_key: Option<&str>,
+    ctx: &SearchContext<'_>,
+    slot: &McpSlot,
     query: &str,
 ) -> (Vec<SearchResult>, Option<String>) {
     const ORDER: [&str; 3] = ["ddg", "brave", "tavily"];
     let mut last_error: Option<String> = None;
 
-    let mut ordered: Vec<&str> = vec![provider];
+    // Prioritas tertinggi: Web Search MCP lokal bila dikonfigurasi.
+    if let Some(cfg) = ctx.mcp_config() {
+        match mcp_summaries(slot, &cfg, query).await {
+            Ok(results) if !results.is_empty() => return (results, None),
+            Ok(_) => {
+                last_error = Some("Web Search MCP tidak mengembalikan hasil.".into());
+            }
+            Err(e) => {
+                last_error = Some(e);
+            }
+        }
+    }
+
+    let mut ordered: Vec<&str> = vec![ctx.provider];
     for candidate in ORDER.iter() {
-        if *candidate != provider {
+        if *candidate != ctx.provider {
             ordered.push(candidate);
         }
     }
 
     for name in ordered.into_iter() {
-        let needs_key = name != "ddg";
-        if needs_key && api_key.map(str::trim).filter(|k| !k.is_empty()).is_none() {
-            last_error = Some(format!(
-                "Provider {name} butuh API key (belum diisi di Pengaturan)."
-            ));
-            continue;
-        }
-        match search(name, api_key, query).await {
+        match search(name, query).await {
             Ok(results) if !results.is_empty() => return (results, None),
             Ok(_) => {
                 last_error = Some(format!("Provider {name} tidak mengembalikan hasil."));
@@ -244,27 +453,13 @@ pub async fn search_with_fallback(
 }
 
 /// Jalankan pencarian sesuai provider. Kembali maksimal 5 hasil.
-pub async fn search(
-    provider: &str,
-    api_key: Option<&str>,
-    query: &str,
-) -> Result<Vec<SearchResult>, String> {
+pub async fn search(provider: &str, query: &str) -> Result<Vec<SearchResult>, String> {
     if query.trim().is_empty() {
         return Err("Query pencarian kosong.".into());
     }
     match provider {
-        "brave" => {
-            let key = api_key.filter(|k| !k.trim().is_empty()).ok_or(
-                "API key Brave belum diisi.\n\nIsi di Pengaturan → Pencarian Web.",
-            )?;
-            brave_search(query, key.trim()).await
-        }
-        "tavily" => {
-            let key = api_key.filter(|k| !k.trim().is_empty()).ok_or(
-                "API key Tavily belum diisi.\n\nIsi di Pengaturan → Pencarian Web.",
-            )?;
-            tavily_search(query, key.trim()).await
-        }
+        "brave" => brave_search(query).await,
+        "tavily" => tavily_search(query).await,
         _ => ddg_search(query).await,
     }
 }

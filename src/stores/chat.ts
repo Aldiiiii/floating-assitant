@@ -7,7 +7,7 @@ import {
   type CaptureMode,
   type ChatMessageDto,
 } from "../lib/api";
-import { db, type ConversationRow } from "../lib/db";
+import { db, type ConversationRow, type SourceRef } from "../lib/db";
 import { DEFAULT_SYSTEM_PROMPT, useSettingsStore } from "./settings";
 import { useVoiceStore } from "./voice";
 
@@ -18,6 +18,7 @@ export interface ChatMsg {
   role: Role;
   content: string;
   image?: string;
+  sources?: { title: string; url: string }[];
   error?: string | null;
 }
 
@@ -71,6 +72,12 @@ interface ChatState {
 
 let requestSeq = 0;
 let activeRequest = -1;
+let pendingSources: SourceRef[] | null = null;
+
+export function estimateTokens(text: string): number {
+  // Heuristik lintas bahasa: ~4 karakter per token.
+  return Math.ceil(text.length / 4);
+}
 let listenersStarted = false;
 
 function deriveTitle(text: string): string {
@@ -137,8 +144,13 @@ async function ensureListeners() {
     let messages = s.messages;
     try {
       if (convId != null && content.trim() !== "") {
-        const id = await db.addMessage(convId, "assistant", content);
-        messages = mutateLastAssistant(messages, (m) => ({ ...m, id }));
+        const sources = pendingSources ?? undefined;
+        const id = await db.addMessage(convId, "assistant", content, sources);
+        messages = mutateLastAssistant(
+          messages,
+          (m) => ({ ...m, id, sources }),
+        );
+        pendingSources = null;
       }
       if (convId != null) await db.touchConversation(convId);
     } finally {
@@ -149,6 +161,11 @@ async function ensureListeners() {
         void useVoiceStore.getState().speak(content).catch(() => undefined);
       }
     }
+  });
+
+  void listen<{ id: number; sources: SourceRef[] }>("chat-sources", (e) => {
+    if (e.payload.id !== activeRequest) return;
+    pendingSources = e.payload.sources.filter((sItem) => sItem.url);
   });
 
   void listen<{ id: number }>("chat-reset", (e) => {
@@ -364,8 +381,25 @@ async function runAssistant(imageParts?: unknown) {
     content:
       hasImage && i === lastIndex && m.role === "user" ? imageParts : m.content,
   }));
-  // Windowing: model kecil kehabisan context bila riwayat terlalu panjang.
-  const history = all.slice(-20);
+  // Windowing token-based: sisakan 30% context utk respons,
+  // system prompt & pesan terbaru selalu diprioritaskan.
+  const contextTokens = settings.contextTokens ?? 4096;
+  const budgetTokens = Math.floor(contextTokens * 0.7);
+  let used =
+    estimateTokens(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT) +
+    estimateTokens(all[all.length - 1]?.content ? JSON.stringify(all[all.length - 1].content) : "");
+  let cut = all.length;
+  for (let i = all.length - 2; i >= 0; i--) {
+    const cost = estimateTokens(JSON.stringify(all[i].content));
+    if (used + cost > budgetTokens) {
+      cut = i + 1;
+      break;
+    }
+    used += cost;
+  }
+  const history = cut === 0 ? all.slice(-1) : all.slice(cut);
+
+  pendingSources = null;
 
   const reqId = ++requestSeq;
   activeRequest = reqId;
@@ -387,12 +421,6 @@ async function runAssistant(imageParts?: unknown) {
       maxTokens: settings.maxTokens,
       webSearchEnabled: settings.webSearchEnabled,
       searchProvider: settings.searchProvider,
-      searchApiKey:
-        settings.searchProvider === "brave"
-          ? settings.braveKey
-          : settings.searchProvider === "tavily"
-            ? settings.tavilyKey
-            : null,
     });
   } catch (e) {
     if (activeRequest === reqId) {

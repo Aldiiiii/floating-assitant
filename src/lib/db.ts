@@ -7,11 +7,17 @@ export interface ConversationRow {
   updated_at: string;
 }
 
+export interface SourceRef {
+  title: string;
+  url: string;
+}
+
 export interface MessageRow {
   id: number;
   conversation_id: number;
   role: "user" | "assistant";
   content: string;
+  sources: SourceRef[] | null;
   created_at: string;
 }
 
@@ -82,22 +88,44 @@ export const db = {
 
   async getMessages(conversationId: number): Promise<MessageRow[]> {
     const d = await getDb();
-    return d.select<MessageRow[]>(
-      "SELECT id, conversation_id, role, content, created_at FROM messages WHERE conversation_id = $1 ORDER BY id ASC",
+    const rows = (await d.select<
+      Array<Omit<MessageRow, "sources"> & { sources?: unknown }>
+    >(
+      "SELECT id, conversation_id, role, content, sources, created_at FROM messages WHERE conversation_id = $1 ORDER BY id ASC",
       [conversationId],
-    );
+    )) as MessageRow[];
+    return rows.map((row) => ({
+      ...row,
+      sources: typeof row.sources === "string" ? safeParseSources(row.sources) : row.sources ?? null,
+    }));
   },
 
   async addMessage(
     conversationId: number,
     role: "user" | "assistant",
     content: string,
+    sources?: SourceRef[],
   ): Promise<number> {
     const d = await getDb();
     const res = await d.execute(
-      "INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)",
-      [conversationId, role, content],
+      "INSERT INTO messages (conversation_id, role, content, sources) VALUES ($1, $2, $3, $4)",
+      [
+        conversationId,
+        role,
+        content,
+        sources && sources.length > 0 ? JSON.stringify(sources) : null,
+      ],
     );
     return Number(res.lastInsertId);
   },
 };
+
+function safeParseSources(raw: unknown): SourceRef[] | null {
+  try {
+    if (typeof raw === "string") return JSON.parse(raw);
+    if (Array.isArray(raw)) return raw as SourceRef[];
+  } catch {
+    /* abaikan */
+  }
+  return null;
+}
