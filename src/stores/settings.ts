@@ -22,7 +22,7 @@ Untuk butuh isi lengkap halaman gunakan:
 {"tool": "deep_search", "arguments": {"query": "kata kunci"}}
 Untuk membaca URL spesifik gunakan:
 {"tool": "read_page", "arguments": {"url": "https://..."}}
-Hasil pencarian akan diberikan padamu untuk dirangkum menjadi jawaban. Sebutkan sumber dengan [1], [2] saat mengutip.`;
+Saat query bergantung pada waktu (harga, kurs, berita, jadwal), sertakan tahun berjalan pada kata kunci.\nHasil pencarian akan diberikan padamu untuk dirangkum menjadi jawaban. Sebutkan sumber dengan [1], [2] saat mengutip.`;
 
 let storePromise: Promise<Store> | null = null;
 
