@@ -260,6 +260,34 @@ pub fn extract_tool_call(response: &str) -> Option<ModelTool> {
 
 const MAX_SEARCH_ITERATIONS: u32 = 2;
 
+/// Ubah konten array (multimodal) menjadi string biasa — diperlukan untuk
+/// model text-only yang template-nya menolak array (Qwen3.x: "No user query found").
+fn flatten_content(content: &mut serde_json::Value) {
+    use serde_json::Value;
+    if let Value::Array(parts) = content {
+        let mut text = String::new();
+        let mut has_image = false;
+        for part in parts.iter() {
+            match part.get("type").and_then(serde_json::Value::as_str) {
+                Some("text") => {
+                    if let Some(t) = part.get("text").and_then(serde_json::Value::as_str) {
+                        text.push_str(t);
+                    }
+                }
+                Some("image_url") => {
+                    has_image = true;
+                }
+                _ => {}
+            }
+        }
+        if has_image {
+            text.push_str("
+[Lampiran gambar tidak dapat dilihat oleh model ini]");
+        }
+        *content = Value::String(text);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_stream(
@@ -302,6 +330,7 @@ pub async fn chat_stream(
 
     let mut iteration: u32 = 0;
     let mut finished_cleanly = false;
+    let mut flattened_retry_used = false;
 
     while iteration <= MAX_SEARCH_ITERATIONS {
         // Buang pesan berkonten kosong — sebagian template chat menolaknya.
@@ -328,6 +357,14 @@ pub async fn chat_stream(
         }
 
         if let Err(e) = result {
+            // Template model text-only menolak konten array → flatten & ulang sekali.
+            if !flattened_retry_used && e.contains("No user query found") {
+                flattened_retry_used = true;
+                for message in convo.iter_mut() {
+                    flatten_content(&mut message.content);
+                }
+                continue;
+            }
             let _ = app.emit("chat-error", StreamErrorPayload { id, error: e });
             break;
         }
