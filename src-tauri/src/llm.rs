@@ -304,6 +304,9 @@ pub async fn chat_stream(
     let mut finished_cleanly = false;
 
     while iteration <= MAX_SEARCH_ITERATIONS {
+        // Buang pesan berkonten kosong — sebagian template chat menolaknya.
+        convo.retain(|m| !matches!(&m.content, serde_json::Value::String(t) if t.trim().is_empty()));
+
         let mut collected = String::new();
         let result = stream_once(
             &app,
@@ -364,7 +367,7 @@ pub async fn chat_stream(
             PhasePayload {
                 id,
                 phase: "searching",
-                query: query_label,
+                query: query_label.clone(),
             },
         );
 
@@ -474,14 +477,41 @@ pub async fn chat_stream(
              ([1], [2]) saat mengutip. Jika datanya tidak cukup atau tidak relevan, \
              katakan terus terang.");
 
-        convo.push(ChatMessage {
-            role: "assistant".into(),
-            content: serde_json::Value::String(collected.trim().to_string()),
-        });
-        convo.push(ChatMessage {
-            role: "user".into(),
-            content: serde_json::Value::String(block),
-        });
+        // Suntikkan hasil ke pesan USER terakhir (bukan sebagai pesan assistant
+        // baru) — sebagian template (mis. Qwen3.x) menolak pola yang tidak
+        // diawali/diakhiri user dengan benar.
+        if let Some(last_user) = convo
+            .iter_mut()
+            .rev()
+            .find(|m| m.role == "user")
+        {
+            let injection = format!(
+                "
+
+[Data pencarian web untuk \"{query_label}\"]
+{block}
+
+Gunakan data di atas untuk menjawab pertanyaanku sebelumnya."
+            );
+            match &mut last_user.content {
+                serde_json::Value::String(text) => text.push_str(&injection),
+                serde_json::Value::Array(parts) => {
+                    parts.push(serde_json::json!({
+                        "type": "text",
+                        "text": injection
+                    }));
+                }
+                _ => {
+                    last_user.content =
+                        serde_json::Value::String(injection);
+                }
+            }
+        } else {
+            convo.push(ChatMessage {
+                role: "user".into(),
+                content: serde_json::Value::String(block),
+            });
+        }
 
         iteration += 1;
     }
