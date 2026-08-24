@@ -223,8 +223,6 @@ pub struct SearchContext<'a> {
     pub provider: &'a str,
     pub mcp_index_path: Option<&'a str>,
     pub mcp_node: Option<&'a str>,
-    /// Sertakan konten halaman penuh pada deep search MCP.
-    pub mcp_full_content: bool,
 }
 
 impl<'a> SearchContext<'a> {
@@ -261,6 +259,7 @@ pub async fn mcp_deep_search(
     slot: &McpSlot,
     cfg: &McpConfig,
     query: &str,
+    full_content: bool,
 ) -> Result<Vec<SearchResult>, String> {
     mcp_client::acquire(slot, cfg)?;
     let text = mcp_client::with_client(slot, |client| {
@@ -268,8 +267,8 @@ pub async fn mcp_deep_search(
             "full-web-search",
             serde_json::json!({
                 "query": query,
-                "limit": 3,
-                "includeContent": true
+                "limit": if full_content { 3 } else { 5 },
+                "includeContent": full_content
             }),
         )
     })?;

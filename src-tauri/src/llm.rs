@@ -10,12 +10,6 @@ use tokio_util::sync::CancellationToken;
 use crate::mcp_client::{McpConfig, McpSlot};
 use crate::web_search::SearchContext;
 
-#[derive(Clone)]
-pub struct McpOptions<'a> {
-    pub index_path: Option<&'a str>,
-    pub node: Option<&'a str>,
-    pub full_content: bool,
-}
 
 const ERR_VISION_UNSUPPORTED: &str = "Model ini tidak mendukung analisis gambar.\n\nGunakan model multimodal (mis. qwen-vl, llava) di Pengaturan.";
 
@@ -352,7 +346,6 @@ pub async fn chat_stream(
             provider: search_provider.as_deref().unwrap_or("ddg"),
             mcp_index_path: mcp_index_path.as_deref(),
             mcp_node: mcp_node.as_deref(),
-            mcp_full_content,
         };
         let mcp_ready = mcp_index_path
             .as_deref()
@@ -386,7 +379,13 @@ pub async fn chat_stream(
             }
             ModelTool::DeepSearch { query } => {
                 if mcp_ready {
-                    match crate::web_search::mcp_deep_search(&mcp_slot, &mcp_cfg, query).await {
+                    match crate::web_search::mcp_deep_search(
+                        &mcp_slot,
+                        &mcp_cfg,
+                        query,
+                        mcp_full_content,
+                    )
+                    .await {
                         Ok(r) => results = r,
                         Err(e) => note = Some(e),
                     }
