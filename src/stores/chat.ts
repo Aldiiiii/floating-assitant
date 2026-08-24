@@ -35,6 +35,7 @@ interface ChunkEvent {
 interface DoneEvent {
   id: number;
   cancelled: boolean;
+  sources?: SourceRef[];
 }
 interface ErrorEvent {
   id: number;
@@ -135,13 +136,16 @@ async function ensureListeners() {
     }));
   });
 
-  void listen<DoneEvent>("chat-done", async (e) => {
+  void listen<DoneEvent & { sources?: SourceRef[] }>("chat-done", async (e) => {
     if (e.payload.id !== activeRequest) return;
     activeRequest = -1;
     const s = useChatStore.getState();
     const convId = s.currentId;
     const content = lastAssistant(s.messages)?.content ?? "";
     let messages = s.messages;
+    if (e.payload.sources && e.payload.sources.length > 0) {
+      pendingSources = e.payload.sources;
+    }
     try {
       if (convId != null && content.trim() !== "") {
         const sources = pendingSources ?? undefined;

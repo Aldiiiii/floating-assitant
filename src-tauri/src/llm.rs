@@ -40,6 +40,7 @@ struct ChunkPayload {
 struct DonePayload {
     id: u32,
     cancelled: bool,
+    sources: Vec<crate::web_search::SearchResult>,
 }
 
 #[derive(Clone, Serialize)]
@@ -333,6 +334,7 @@ pub async fn chat_stream(
     let mut iteration: u32 = 0;
     let mut finished_cleanly = false;
     let mut flattened_retry_used = false;
+    let mut last_sources: Vec<crate::web_search::SearchResult> = Vec::new();
 
     while iteration <= MAX_SEARCH_ITERATIONS {
         // Buang pesan berkonten kosong — sebagian template chat menolaknya.
@@ -353,7 +355,7 @@ pub async fn chat_stream(
         .await;
 
         if token.is_cancelled() {
-            let _ = app.emit("chat-done", DonePayload { id, cancelled: true });
+            let _ = app.emit("chat-done", DonePayload { id, cancelled: true, sources: last_sources.clone() });
             registry.0.lock().await.remove(&id);
             return Ok(());
         }
@@ -501,6 +503,12 @@ pub async fn chat_stream(
 
         // Citations dikirim sebelum jawaban final mengalir.
         if !results.is_empty() {
+            last_sources = results
+                .iter()
+                .filter(|r| !r.url.is_empty())
+                .take(6)
+                .cloned()
+                .collect();
             let _ = app.emit(
                 "chat-sources",
                 serde_json::json!({
@@ -582,7 +590,14 @@ Gunakan data di atas untuk menjawab pertanyaanku sebelumnya."
     registry.0.lock().await.remove(&id);
 
     let _ = finished_cleanly;
-    let _ = app.emit("chat-done", DonePayload { id, cancelled: token.is_cancelled() });
+    let _ = app.emit(
+        "chat-done",
+        DonePayload {
+            id,
+            cancelled: token.is_cancelled(),
+            sources: last_sources.clone(),
+        },
+    );
     Ok(())
 }
 
