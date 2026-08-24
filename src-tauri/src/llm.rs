@@ -359,6 +359,11 @@ pub async fn chat_stream(
         if let Err(e) = result {
             // Template model text-only menolak konten array → flatten & ulang sekali.
             if !flattened_retry_used && e.contains("No user query found") {
+                // DEBUG: dump payload yang gagal untuk diagnosa.
+                if let Ok(json) = serde_json::to_string_pretty(&convo) {
+                    let dump = std::env::temp_dir().join("astra-failing-payload.json");
+                    let _ = std::fs::write(&dump, json);
+                }
                 flattened_retry_used = true;
                 for message in convo.iter_mut() {
                     flatten_content(&mut message.content);

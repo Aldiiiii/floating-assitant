@@ -388,7 +388,7 @@ async function runAssistant(imageParts?: unknown) {
   let used =
     estimateTokens(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT) +
     estimateTokens(all[all.length - 1]?.content ? JSON.stringify(all[all.length - 1].content) : "");
-  let cut = all.length;
+  let cut = 0;
   for (let i = all.length - 2; i >= 0; i--) {
     const cost = estimateTokens(JSON.stringify(all[i].content));
     if (used + cost > budgetTokens) {
@@ -397,7 +397,8 @@ async function runAssistant(imageParts?: unknown) {
     }
     used += cost;
   }
-  const history = cut === 0 ? all.slice(-1) : all.slice(cut);
+  // Muat seluruhnya → cut tetap 0 (kirim semua); melebihi → pangkas dari depan.
+  const history = all.slice(cut);
 
   pendingSources = null;
 
