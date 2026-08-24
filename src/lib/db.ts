@@ -66,6 +66,14 @@ export const db = {
     await d.execute("DELETE FROM conversations WHERE id = $1", [id]);
   },
 
+  async deleteMessagesFrom(conversationId: number, fromId: number): Promise<void> {
+    const d = await getDb();
+    await d.execute(
+      "DELETE FROM messages WHERE conversation_id = $1 AND id >= $2",
+      [conversationId, fromId],
+    );
+  },
+
   async clearAllConversations(): Promise<void> {
     const d = await getDb();
     await d.execute("DELETE FROM messages", []);

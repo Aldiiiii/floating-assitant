@@ -21,6 +21,9 @@ export function Composer() {
   const captureError = useChatStore((s) => s.captureError);
   const attach = useChatStore((s) => s.attach);
   const removeAttachment = useChatStore((s) => s.removeAttachment);
+  const searchPhase = useChatStore((s) => s.searchPhase);
+  const editDraft = useChatStore((s) => s.editDraft);
+  const setEditDraft = useChatStore((s) => s.setEditDraft);
 
   const voiceState = useVoiceStore((s) => s.state);
   const micEnabled = useVoiceStore((s) => s.micEnabled);
@@ -34,6 +37,21 @@ export function Composer() {
 
   const isRecording = voiceState === "recording";
   const isTranscribing = voiceState === "transcribing";
+
+  useEffect(() => {
+    if (editDraft != null) {
+      setValue(editDraft);
+      setEditDraft(null);
+      requestAnimationFrame(() => {
+        const el = document.querySelector<HTMLTextAreaElement>("textarea");
+        if (el) {
+          el.focus();
+          el.style.height = "auto";
+          el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
+        }
+      });
+    }
+  }, [editDraft, setEditDraft]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -88,6 +106,7 @@ export function Composer() {
   };
 
   return <footer className="border-t border-white/[.09] bg-[#181816] p-2.5">
+    {searchPhase && <div className="mb-2 flex items-center gap-2 border border-white/[.08] bg-white/[.04] px-3 py-2 text-[10px] text-[#b6b6ad]"><span className="h-3 w-3 animate-spin rounded-full border-2 border-[#c8f16b] border-t-transparent" />Mencari web: “{searchPhase}”…</div>}
     {(attachment || capturing || captureError || voiceError) && <div className="mb-2 space-y-1.5">
       {capturing && <div className="flex items-center gap-2 border border-white/[.08] bg-white/[.04] px-3 py-2 text-[10px] text-[#b6b6ad]"><span className="h-3 w-3 animate-spin rounded-full border-2 border-[#c8f16b] border-t-transparent" />Menyiapkan screenshot…</div>}
       {!capturing && attachment && <div className="flex items-center gap-2 border border-white/[.08] bg-white/[.04] p-1.5"><img src={attachment.dataUrl} alt="Screenshot terlampir" className="h-10 w-14 object-cover" /><div><p className="text-[10px] text-[#dbdad3]">Konteks layar terpasang</p><p className="mt-0.5 text-[9px] text-[#85857d]">{attachment.width} × {attachment.height}</p></div><button onClick={removeAttachment} title="Hapus screenshot" className="ml-auto flex h-7 w-7 items-center justify-center text-[#85857d] hover:text-white"><Icon name="close" className="h-3.5 w-3.5" /></button></div>}

@@ -37,6 +37,7 @@ sha2 = "0.11.0"
 zip = "8.6.0"
 flate2 = "1.1.9"
 tar = "0.4.46"
+scraper = "0.27.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

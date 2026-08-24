@@ -8,7 +8,7 @@ import {
   type ChatMessageDto,
 } from "../lib/api";
 import { db, type ConversationRow } from "../lib/db";
-import { useSettingsStore } from "./settings";
+import { DEFAULT_SYSTEM_PROMPT, useSettingsStore } from "./settings";
 import { useVoiceStore } from "./voice";
 
 export type Role = "user" | "assistant";
@@ -50,6 +50,8 @@ interface ChatState {
   attachment: Attachment | null;
   capturing: boolean;
   captureError: string | null;
+  searchPhase: string | null;
+  editDraft: string | null;
 
   init: () => Promise<void>;
   setSidebar: (open: boolean) => void;
@@ -57,6 +59,9 @@ interface ChatState {
   openConversation: (id: number) => Promise<void>;
   deleteConversation: (id: number) => Promise<void>;
   clearAll: () => Promise<void>;
+  regenerate: () => Promise<void>;
+  editLastUser: (msg: ChatMsg) => void;
+  setEditDraft: (v: string | null) => void;
   attach: (mode: CaptureMode) => Promise<void>;
   removeAttachment: () => void;
   send: (text: string) => Promise<void>;
@@ -138,7 +143,7 @@ async function ensureListeners() {
       if (convId != null) await db.touchConversation(convId);
     } finally {
       messages = dropTrailingEmptyAssistant(messages);
-      useChatStore.setState({ streaming: false, messages });
+      useChatStore.setState({ streaming: false, searchPhase: null, messages });
       void refreshConversations();
       if (useVoiceStore.getState().autoSpeak && content.trim() !== "") {
         void useVoiceStore.getState().speak(content).catch(() => undefined);
@@ -146,11 +151,24 @@ async function ensureListeners() {
     }
   });
 
+  void listen<{ id: number }>("chat-reset", (e) => {
+    if (e.payload.id !== activeRequest) return;
+    useChatStore.setState((s) => ({
+      messages: mutateLastAssistant(s.messages, (m) => ({ ...m, content: "" })),
+    }));
+  });
+
+  void listen<{ id: number; phase: string; query?: string }>("chat-phase", (e) => {
+    if (e.payload.id !== activeRequest) return;
+    useChatStore.setState({ searchPhase: e.payload.phase === "searching" ? e.payload.query : null });
+  });
+
   void listen<ErrorEvent>("chat-error", (e) => {
     if (e.payload.id !== activeRequest) return;
     activeRequest = -1;
     useChatStore.setState((s) => ({
       streaming: false,
+      searchPhase: null,
       messages: mutateLastAssistant(s.messages, (m) => ({
         ...m,
         error: e.payload.error,
@@ -169,6 +187,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   attachment: null,
   capturing: false,
   captureError: null,
+  searchPhase: null,
+  editDraft: null,
 
   init: async () => {
     await ensureListeners();
@@ -284,6 +304,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
     void runAssistant();
   },
 
+  regenerate: async () => {
+    const s = get();
+    if (s.streaming) return;
+    set((st) => {
+      const msgs = [...st.messages];
+      while (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") msgs.pop();
+      return { messages: msgs };
+    });
+    void runAssistant();
+  },
+
+  editLastUser: (msg) => {
+    const s = get();
+    if (s.streaming || msg.role !== "user" || s.currentId == null) return;
+    const idx = s.messages.findIndex((m) => m.id === msg.id);
+    if (idx < 0) return;
+    // Buang pesan user ini dan semua sesudahnya (state + DB).
+    const removed = s.messages.slice(idx);
+    const draftText = msg.content.replace(/\n\n\[📷 Screenshot[^\]]*\]$/, "").trimEnd();
+    set({ messages: s.messages.slice(0, idx), editDraft: draftText });
+    if (s.currentId != null) {
+      const firstRemovedId = removed.find((m) => m.id != null)?.id;
+      if (firstRemovedId != null) void db.deleteMessagesFrom(s.currentId, firstRemovedId);
+    }
+  },
+
+  setEditDraft: (v) => set({ editDraft: v }),
+
   stop: () => {
     if (activeRequest > 0) void chatCancel(activeRequest);
   },
@@ -311,11 +359,13 @@ async function runAssistant(imageParts?: unknown) {
   const msgs = chat.messages;
   const lastIndex = msgs.length - 1;
   const hasImage = imageParts != null;
-  const history: ChatMessageDto[] = msgs.map((m, i) => ({
+  const all: ChatMessageDto[] = msgs.map((m, i) => ({
     role: m.role,
     content:
       hasImage && i === lastIndex && m.role === "user" ? imageParts : m.content,
   }));
+  // Windowing: model kecil kehabisan context bila riwayat terlalu panjang.
+  const history = all.slice(-20);
 
   const reqId = ++requestSeq;
   activeRequest = reqId;
@@ -331,6 +381,18 @@ async function runAssistant(imageParts?: unknown) {
       model: settings.model,
       messages: history,
       hasImage,
+      systemPrompt: settings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+      temperature: settings.temperature,
+      topP: settings.topP,
+      maxTokens: settings.maxTokens,
+      webSearchEnabled: settings.webSearchEnabled,
+      searchProvider: settings.searchProvider,
+      searchApiKey:
+        settings.searchProvider === "brave"
+          ? settings.braveKey
+          : settings.searchProvider === "tavily"
+            ? settings.tavilyKey
+            : null,
     });
   } catch (e) {
     if (activeRequest === reqId) {

@@ -11,6 +11,7 @@ mod lm;
 mod platform;
 mod screenshot;
 mod voice;
+mod web_search;
 mod window_shape;
 
 const MIGRATIONS: &[Migration] = &[

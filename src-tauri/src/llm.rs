@@ -16,6 +16,14 @@ pub struct ChatMessage {
     pub content: serde_json::Value,
 }
 
+/// Parameter generasi yang dikirim ke endpoint /chat/completions.
+#[derive(Default)]
+pub struct GenerationParams {
+    pub temperature: Option<f64>,
+    pub top_p: Option<f64>,
+    pub max_tokens: Option<u64>,
+}
+
 #[derive(Clone, Serialize)]
 struct ChunkPayload {
     id: u32,
@@ -34,11 +42,23 @@ struct StreamErrorPayload {
     error: String,
 }
 
+#[derive(Clone, Serialize)]
+struct PhasePayload {
+    id: u32,
+    phase: &'static str,
+    query: String,
+}
+
+#[derive(Clone, Serialize)]
+struct ResetPayload {
+    id: u32,
+}
+
 /// Registry request aktif untuk mendukung stop generation.
 #[derive(Default)]
 pub struct StreamRegistry(pub Mutex<HashMap<u32, CancellationToken>>);
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 struct CompletionChunk {
     #[serde(default)]
     choices: Vec<CompletionChoice>,
@@ -118,13 +138,24 @@ async fn stream_once(
     model: &str,
     messages: &[ChatMessage],
     has_image: bool,
+    gen: &GenerationParams,
+    collected: &mut String,
 ) -> Result<(), String> {
     let url = format!("{}/chat/completions", normalize_base(base_url));
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "model": model,
         "messages": messages,
         "stream": true,
     });
+    if let Some(t) = gen.temperature {
+        body["temperature"] = serde_json::json!(t);
+    }
+    if let Some(p) = gen.top_p {
+        body["top_p"] = serde_json::json!(p);
+    }
+    if let Some(m) = gen.max_tokens {
+        body["max_tokens"] = serde_json::json!(m);
+    }
 
     let resp = http_client()?.post(url).json(&body).send().await.map_err(|e| {
         if e.is_connect() || e.is_timeout() {
@@ -161,6 +192,7 @@ async fn stream_once(
                         let line = String::from_utf8_lossy(&raw[..raw.len() - 1]);
                         match parse_sse_line(line.trim()) {
                             SseLine::Delta(delta) => {
+                                collected.push_str(&delta);
                                 let _ = app.emit("chat-chunk", ChunkPayload { id, delta });
                             }
                             SseLine::Done => return Ok(()),
@@ -174,6 +206,20 @@ async fn stream_once(
         }
     }
 }
+
+/// Ekstrak query dari respons yang persis berbentuk `[CARI: ...]`.
+fn extract_search_query(response: &str) -> Option<String> {
+    let trimmed = response.trim();
+    if !(trimmed.starts_with("[CARI:") && trimmed.ends_with(']')) {
+        return None;
+    }
+    let inner = trimmed["[CARI:".len()..trimmed.len() - 1].trim();
+    (!inner.is_empty()).then(|| inner.to_string())
+}
+
+const MAX_SEARCH_ITERATIONS: u32 = 2;
+
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn chat_stream(
     app: AppHandle,
@@ -183,30 +229,118 @@ pub async fn chat_stream(
     model: String,
     messages: Vec<ChatMessage>,
     has_image: bool,
+    system_prompt: Option<String>,
+    temperature: Option<f64>,
+    top_p: Option<f64>,
+    max_tokens: Option<u64>,
+    web_search_enabled: bool,
+    search_provider: Option<String>,
+    search_api_key: Option<String>,
 ) -> Result<(), String> {
     let token = CancellationToken::new();
     registry.0.lock().await.insert(id, token.clone());
 
-    let result =
-        stream_once(&app, &token, id, &base_url, &model, &messages, has_image).await;
+    let gen = GenerationParams {
+        temperature,
+        top_p,
+        max_tokens,
+    };
+
+    // System prompt selalu menjadi pesan pertama.
+    let mut convo: Vec<ChatMessage> = Vec::with_capacity(messages.len() + 3);
+    if let Some(sp) = system_prompt.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        convo.push(ChatMessage {
+            role: "system".into(),
+            content: serde_json::Value::String(sp.to_string()),
+        });
+    }
+    convo.extend(messages);
+
+    let mut iteration: u32 = 0;
+    let mut finished_cleanly = false;
+
+    while iteration <= MAX_SEARCH_ITERATIONS {
+        let mut collected = String::new();
+        let result = stream_once(
+            &app,
+            &token,
+            id,
+            &base_url,
+            &model,
+            &convo,
+            has_image,
+            &gen,
+            &mut collected,
+        )
+        .await;
+
+        if token.is_cancelled() {
+            let _ = app.emit("chat-done", DonePayload { id, cancelled: true });
+            registry.0.lock().await.remove(&id);
+            return Ok(());
+        }
+
+        if let Err(e) = result {
+            let _ = app.emit("chat-error", StreamErrorPayload { id, error: e });
+            break;
+        }
+
+        // Deteksi ketat: [CARI: ...] harus merupakan SELURUH respons.
+        let Some(query) =
+            (web_search_enabled && iteration < MAX_SEARCH_ITERATIONS)
+                .then(|| extract_search_query(&collected))
+                .flatten()
+        else {
+            finished_cleanly = true;
+            break;
+        };
+
+        let _ = app.emit(
+            "chat-phase",
+            PhasePayload {
+                id,
+                phase: "searching",
+                query: query.clone(),
+            },
+        );
+
+        let (results, search_note) = crate::web_search::search_with_fallback(
+            &search_provider.clone().unwrap_or_else(|| "ddg".into()),
+            search_api_key.as_deref(),
+            &query,
+        )
+        .await;
+
+        // Hapus teks tag dari layar sebelum melanjutkan jawaban sesungguhnya.
+        let _ = app.emit("chat-reset", ResetPayload { id });
+
+        let mut block = format!("Hasil pencarian web untuk \"{query}\":\n");
+        for (i, r) in results.iter().enumerate() {
+            block.push_str(&format!("\n[{}] {}\n{}\n{}\n", i + 1, r.title, r.url, r.snippet));
+        }
+        if let Some(note) = search_note {
+            block.push_str(&format!("\n\nCatatan: {note}"));
+        }
+        block.push_str("\n\nGunakan data di atas untuk menjawab pertanyaan saya \
+             sebelumnya. Jika datanya tidak cukup atau tidak relevan, katakan terus terang.");
+
+        convo.push(ChatMessage {
+            role: "assistant".into(),
+            content: serde_json::Value::String(collected.trim().to_string()),
+        });
+        convo.push(ChatMessage {
+            role: "user".into(),
+            content: serde_json::Value::String(block),
+        });
+
+        iteration += 1;
+    }
 
     registry.0.lock().await.remove(&id);
 
-    if token.is_cancelled() {
-        let _ = app.emit("chat-done", DonePayload { id, cancelled: true });
-        return Ok(());
-    }
-
-    match result {
-        Ok(()) => {
-            let _ = app.emit("chat-done", DonePayload { id, cancelled: false });
-            Ok(())
-        }
-        Err(e) => {
-            let _ = app.emit("chat-error", StreamErrorPayload { id, error: e });
-            Ok(())
-        }
-    }
+    let _ = finished_cleanly;
+    let _ = app.emit("chat-done", DonePayload { id, cancelled: token.is_cancelled() });
+    Ok(())
 }
 
 #[tauri::command]

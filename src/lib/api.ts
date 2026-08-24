@@ -47,14 +47,31 @@ export function setWindowShape(radius: number): Promise<void> {
   return invoke("set_window_shape", { radius });
 }
 
-export async function chatStream(args: {
-  id: number;
-  baseUrl: string;
-  model: string;
-  messages: ChatMessageDto[];
-  hasImage: boolean;
-}): Promise<void> {
-  return invoke("chat_stream", args);
+export interface GenerationOptions {
+  systemPrompt?: string | null;
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  webSearchEnabled?: boolean;
+  searchProvider?: string;
+  searchApiKey?: string | null;
+}
+
+export async function chatStream(
+  args: {
+    id: number;
+    baseUrl: string;
+    model: string;
+    messages: ChatMessageDto[];
+    hasImage: boolean;
+  } & GenerationOptions,
+): Promise<void> {
+  return invoke("chat_stream", {
+    ...args,
+    systemPrompt: args.systemPrompt ?? null,
+    searchProvider: args.searchProvider ?? "ddg",
+    searchApiKey: args.searchApiKey ?? null,
+  });
 }
 
 export async function chatCancel(id: number): Promise<void> {

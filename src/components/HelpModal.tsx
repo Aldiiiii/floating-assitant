@@ -42,6 +42,16 @@ const SECTIONS: { title: string; icon: IconName; items: string[] }[] = [
     ],
   },
   {
+    title: "Data terbaru & kualitas jawaban",
+    icon: "sparkle",
+    items: [
+      "Saat butuh data segar, model dapat meminta pencarian web dengan format [CARI: kata kunci] — hasilnya otomatis disuntikkan lalu jawaban dilanjutkan.",
+      "Provider pencarian (DuckDuckGo / Brave / Tavily) diatur di Pengaturan → Pencarian web.",
+      "System prompt, temperature, top-p, dan max tokens dapat disesuaikan di Pengaturan → Gaya jawaban.",
+      "Gunakan tombol Regenerate pada jawaban terakhir atau ikon edit pada pesanmu untuk iterasi cepat.",
+    ],
+  },
+  {
     title: "Koneksi & privasi",
     icon: "shield",
     items: [
