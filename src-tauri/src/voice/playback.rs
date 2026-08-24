@@ -14,6 +14,7 @@ use rodio::cpal::traits::{DeviceTrait, HostTrait};
 
 enum Msg {
     Play { path: PathBuf, device: Option<String> },
+    Pause,
     Stop,
 }
 
@@ -49,6 +50,13 @@ pub fn play(app: &AppHandle, path: PathBuf, device: Option<String>) {
     }
     if let Some(tx) = TX.get() {
         let _ = tx.send(Msg::Play { path, device });
+    }
+}
+
+/// Toggle pause/resume pada pemutaran aktif (no-op bila idle).
+pub fn pause(_app: &AppHandle) {
+    if let Some(tx) = TX.get() {
+        let _ = tx.send(Msg::Pause);
     }
 }
 
@@ -142,9 +150,23 @@ fn audio_loop(app: AppHandle, rx: Receiver<Msg>) {
                     Err(e) => emit_error(&app, &e),
                 }
             }
+            Ok(Msg::Pause) => {
+                if let Some((_, player)) = &active {
+                    let was_paused = player.is_paused();
+                    if was_paused {
+                        player.play();
+                        emit_state(&app, "playing");
+                    } else {
+                        player.pause();
+                        emit_state(&app, "paused");
+                    }
+                }
+            }
             Ok(Msg::Stop) => {
                 if let Some((_, player)) = active.take() {
                     player.stop();
+                    // Status idle dikirim SEGERA — tidak menunggu polling watcher.
+                    emit_state(&app, "idle");
                 } else {
                     emit_state(&app, "idle");
                 }

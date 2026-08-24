@@ -5,6 +5,7 @@ import {
   audioOutputDevices,
   modelDownload,
   modelStatus,
+  ttsPause,
   ttsSpeak,
   ttsStop,
   voiceStart,
@@ -29,6 +30,7 @@ interface VoiceStateStore {
   state: "idle" | "recording" | "transcribing" | "error";
   error: string | null;
   speaking: boolean;
+  paused: boolean;
 
   downloads: Record<string, number | null>;
 
@@ -54,6 +56,7 @@ interface VoiceStateStore {
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<{ text: string; language: string } | null>;
   speak: (text: string) => Promise<void>;
+  togglePause: () => void;
   stopSpeaking: () => void;
   downloadModel: (key: string) => Promise<void>;
   refreshInstalled: (key: string) => Promise<void>;
@@ -79,11 +82,17 @@ async function ensureListeners() {
 
   void listen<{ state: string; error?: string }>("tts-state", (e) => {
     if (e.payload.state === "playing" || e.payload.state === "loading") {
-      useVoiceStore.setState({ speaking: true, playbackError: e.payload.error ?? null });
+      useVoiceStore.setState({
+        speaking: true,
+        paused: e.payload.state === "playing" ? false : useVoiceStore.getState().paused,
+        playbackError: e.payload.error ?? null,
+      });
+    } else if (e.payload.state === "paused") {
+      useVoiceStore.setState({ speaking: true, paused: true });
     } else if (e.payload.state === "error") {
-      useVoiceStore.setState({ speaking: false, playbackError: e.payload.error ?? "TTS gagal." });
+      useVoiceStore.setState({ speaking: false, paused: false, playbackError: e.payload.error ?? "TTS gagal." });
     } else {
-      useVoiceStore.setState({ speaking: false });
+      useVoiceStore.setState({ speaking: false, paused: false });
     }
   });
 
@@ -117,6 +126,7 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
   state: "idle",
   error: null,
   speaking: false,
+  paused: false,
 
   downloads: {},
   micDevice: null,
@@ -251,6 +261,11 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
       set({ speaking: false, playbackError: msg });
       console.error("[tts]", msg);
     }
+  },
+
+  togglePause: () => {
+    if (!get().speaking) return;
+    ttsPause().catch(() => undefined);
   },
 
   stopSpeaking: () => {

@@ -205,6 +205,11 @@ pub fn tts_stop(app: AppHandle) {
 }
 
 #[tauri::command]
+pub fn tts_pause(app: AppHandle) {
+    playback::pause(&app);
+}
+
+#[tauri::command]
 pub fn audio_output_devices() -> Result<Vec<String>, String> {
     let host = cpal::default_host();
     let mut names = Vec::new();

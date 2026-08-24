@@ -1,6 +1,6 @@
 import type { ReactNode, SVGProps } from "react";
 
-export type IconName = "sparkle" | "menu" | "help" | "settings" | "minimize" | "send" | "stop" | "image" | "close" | "plus" | "copy" | "refresh" | "chevron" | "shield" | "history" | "mic" | "volume";
+export type IconName = "sparkle" | "menu" | "help" | "settings" | "minimize" | "send" | "stop" | "image" | "close" | "plus" | "copy" | "refresh" | "chevron" | "shield" | "history" | "mic" | "volume" | "pause" | "play";
 
 export function Icon({ name, className = "", ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {
   const common = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, className };
@@ -20,6 +20,8 @@ export function Icon({ name, className = "", ...props }: { name: IconName } & SV
     chevron: <path d="m9 18 6-6-6-6" />,
     mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" /><path d="M12 18v3" /></>,
     volume: <><path d="M11 5 6.5 8.5H4v7h2.5L11 19V5Z" /><path d="M15.5 9.5a3.5 3.5 0 0 1 0 5" /><path d="M18 7.5a6.3 6.3 0 0 1 0 9" /></>,
+    pause: <><path d="M9 5v14" /><path d="M15 5v14" /></>,
+    play: <path d="M7 4.5v15l13-7.5-13-7.5Z" />,
     shield: <><path d="M12 3 5 6v5c0 4.7 3 8.4 7 10 4-1.6 7-5.3 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></>,
     history: <><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6" /><path d="M4 4v4.6h4.6" /><path d="M12 8v4l2.7 1.6" /></>,
   };

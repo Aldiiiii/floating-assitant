@@ -106,6 +106,10 @@ export function ttsStop(): Promise<void> {
   return invoke("tts_stop");
 }
 
+export function ttsPause(): Promise<void> {
+  return invoke("tts_pause");
+}
+
 export function modelStatus(
   key: string,
 ): Promise<{ installed: boolean; downloading: boolean }> {

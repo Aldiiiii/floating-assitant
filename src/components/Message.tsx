@@ -12,9 +12,15 @@ function CopyButton({ text }: { text: string }) {
 
 function SpeakButton({ text }: { text: string }) {
   const speaking = useVoiceStore((s) => s.speaking);
+  const paused = useVoiceStore((s) => s.paused);
   const speak = useVoiceStore((s) => s.speak);
+  const togglePause = useVoiceStore((s) => s.togglePause);
   const stopSpeaking = useVoiceStore((s) => s.stopSpeaking);
-  return <button onClick={() => { if (speaking) stopSpeaking(); else void speak(text).catch(() => undefined); }} title={speaking ? "Hentikan suara" : "Bacakan jawaban"} className="flex items-center gap-1 px-1 py-1 text-[9px] text-[#787870] opacity-0 transition-opacity hover:text-[#e7e6df] group-hover/msg:opacity-100"><Icon name={"volume" as IconName} className="h-3 w-3" />{speaking ? "Stop" : "Bacakan"}</button>;
+  if (!speaking) return <button onClick={() => void speak(text)} title="Bacakan jawaban" className="flex items-center gap-1 px-1 py-1 text-[9px] text-[#787870] opacity-0 transition-opacity hover:text-[#e7e6df] group-hover/msg:opacity-100"><Icon name={"volume" as IconName} className="h-3 w-3" />Bacakan</button>;
+  return <span className="flex items-center gap-0.5 opacity-100">
+    <button onClick={togglePause} title={paused ? "Lanjutkan" : "Jeda"} className={`flex items-center gap-1 px-1 py-1 text-[9px] transition-opacity ${paused ? "text-[#c8f16b]" : "text-[#dbdad3]"}`}><Icon name={paused ? ("play" as IconName) : ("pause" as IconName)} className="h-3 w-3" />{paused ? "Lanjut" : "Jeda"}</button>
+    <button onClick={stopSpeaking} title="Hentikan" className="flex items-center gap-1 px-1 py-1 text-[9px] text-[#f07167]"><Icon name="stop" className="h-3 w-3" />Stop</button>
+  </span>;
 }
 
 function TypingIndicator() { return <div className="flex h-6 items-center gap-1"><span className="h-1 w-1 animate-bounce rounded-full bg-[#c8f16b] [animation-delay:-.2s]" /><span className="h-1 w-1 animate-bounce rounded-full bg-[#c8f16b] [animation-delay:-.1s]" /><span className="h-1 w-1 animate-bounce rounded-full bg-[#c8f16b]" /></div>; }
