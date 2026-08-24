@@ -421,6 +421,9 @@ async function runAssistant(imageParts?: unknown) {
       maxTokens: settings.maxTokens,
       webSearchEnabled: settings.webSearchEnabled,
       searchProvider: settings.searchProvider,
+      mcpIndexPath: settings.mcpIndexPath || null,
+      mcpNode: settings.mcpNode || null,
+      mcpFullContent: settings.mcpFullContent,
     });
   } catch (e) {
     if (activeRequest === reqId) {

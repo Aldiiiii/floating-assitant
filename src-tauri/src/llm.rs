@@ -279,7 +279,7 @@ pub async fn chat_stream(
     search_provider: Option<String>,
     mcp_index_path: Option<String>,
     mcp_node: Option<String>,
-    mcp_full_content: bool,
+    mcp_full_content: Option<bool>,
 ) -> Result<(), String> {
     let token = CancellationToken::new();
     registry.0.lock().await.insert(id, token.clone());
@@ -342,6 +342,7 @@ pub async fn chat_stream(
             index_path: mcp_index_path.as_deref().unwrap_or("").to_string(),
             node: mcp_node.as_deref().unwrap_or("node").to_string(),
         };
+        let mcp_full_content = mcp_full_content.unwrap_or(false);
         let ctx = SearchContext {
             provider: search_provider.as_deref().unwrap_or("ddg"),
             mcp_index_path: mcp_index_path.as_deref(),

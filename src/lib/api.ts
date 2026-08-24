@@ -72,6 +72,9 @@ export interface GenerationOptions {
   maxTokens?: number;
   webSearchEnabled?: boolean;
   searchProvider?: string;
+  mcpIndexPath?: string | null;
+  mcpNode?: string | null;
+  mcpFullContent?: boolean;
 }
 
 export async function chatStream(
