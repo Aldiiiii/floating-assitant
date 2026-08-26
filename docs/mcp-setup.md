@@ -2,9 +2,27 @@
 
 Floating Assistant dapat browsing tanpa MCP melalui provider HTTP bawaan. Jika `web-search-mcp` dikonfigurasi, MCP menjadi jalur utama pencarian web umum; provider HTTP menjadi fallback. Berita dan kurs memakai sumber terstruktur khusus terlebih dahulu.
 
+Gunakan fork [Aldiiiii/web-search-mcp](https://github.com/Aldiiiii/web-search-mcp). Fork ini mempertahankan `upstream` asli tetapi menyesuaikan output, logging, ekstraksi, dan keamanan URL untuk kontrak evidence Floating Assistant. Baseline kompatibilitas saat ini adalah commit `0f4e12b` pada branch `main`.
+
 ## Build MCP
 
 Prasyarat: Node.js 18+ untuk server MCP. Aplikasi utamanya sendiri menggunakan Node.js 20+ saat development.
+
+Clone satu kali dari root repository Floating Assistant.
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force tools | Out-Null
+git clone --branch main --single-branch https://github.com/Aldiiiii/web-search-mcp.git tools/web-search-mcp
+```
+
+Linux Mint atau Git Bash:
+
+```bash
+mkdir -p tools
+git clone --branch main --single-branch https://github.com/Aldiiiii/web-search-mcp.git tools/web-search-mcp
+```
 
 Windows:
 

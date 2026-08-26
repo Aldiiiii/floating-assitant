@@ -125,9 +125,26 @@ Aktifkan **Pengaturan → Pencarian web → Izinkan pencarian web**. Tanpa MCP, 
 
 ### Menambahkan Web Search MCP lokal
 
-Clone/build server yang kompatibel, lalu:
+Floating Assistant memakai fork [Aldiiiii/web-search-mcp](https://github.com/Aldiiiii/web-search-mcp) yang menghasilkan JSON terstruktur, menjaga log MCP di `stderr`, dan menambahkan pembatasan URL publik. Baseline yang telah disesuaikan dengan aplikasi ini adalah commit `0f4e12b`; branch `main` fork digunakan selama pengembangan aktif.
+
+Dari root repository Floating Assistant, clone dan build fork tersebut.
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force tools | Out-Null
+git clone --branch main --single-branch https://github.com/Aldiiiii/web-search-mcp.git tools/web-search-mcp
+Set-Location tools/web-search-mcp
+npm.cmd ci
+npm.cmd run build
+npx.cmd playwright install chromium firefox
+```
+
+Linux Mint atau Git Bash:
 
 ```bash
+mkdir -p tools
+git clone --branch main --single-branch https://github.com/Aldiiiii/web-search-mcp.git tools/web-search-mcp
 cd tools/web-search-mcp
 npm ci
 npm run build
@@ -141,7 +158,7 @@ Di **Pengaturan → Pencarian web**:
 3. Aktifkan konten penuh bila ingin ekstraksi halaman lebih kaya.
 4. Klik **Cek** dan pastikan jumlah tool terdeteksi.
 
-Implementasi MCP saat ini bukan host MCP generik. Runtime aplikasi secara khusus memanggil tool `web_search`, `deep_search`, dan `read_page` dari server web-search-mcp. Menambah server/tool MCP sembarang ke UI belum cukup untuk membuat model dapat memakainya.
+Implementasi MCP saat ini bukan host MCP generik. Runtime aplikasi secara khusus memanggil tool `web_search`, `deep_search`, dan `read_page` dari fork tersebut. Menambah server/tool MCP sembarang ke UI belum cukup untuk membuat model dapat memakainya.
 
 ### Menambahkan tool aplikasi baru sebagai developer
 
