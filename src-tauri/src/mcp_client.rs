@@ -38,7 +38,8 @@ impl McpProcess {
         cmd.arg(&config.index_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            // MCP protocol uses stdout; diagnostics belong on stderr.
+            .stderr(Stdio::inherit());
         cmd.env("DEFAULT_TIMEOUT", "8000");
         cmd.env("MAX_CONTENT_LENGTH", "12000");
 
@@ -139,8 +140,7 @@ impl McpProcess {
     }
 
     fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
-        let line = json!({ "jsonrpc": "2.0", "method": method, "params": params })
-            .to_string();
+        let line = json!({ "jsonrpc": "2.0", "method": method, "params": params }).to_string();
         self.send_raw(&line)
     }
 
@@ -158,10 +158,7 @@ impl McpProcess {
 
     /// Jalankan tools/call dan gabungkan seluruh blok teks dari konten.
     pub fn call_tool(&mut self, name: &str, args: Value) -> Result<String, String> {
-        let result = self.request(
-            "tools/call",
-            json!({ "name": name, "arguments": args }),
-        )?;
+        let result = self.request("tools/call", json!({ "name": name, "arguments": args }))?;
 
         let is_error = result
             .get("isError")
@@ -189,19 +186,47 @@ impl McpProcess {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+
+    fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+}
+
+impl Drop for McpProcess {
+    fn drop(&mut self) {
+        self.kill();
+    }
 }
 
 /// Slot proses MCP yang hidup sepanjang aplikasi (hemat startup Node).
 #[derive(Clone, Default)]
 pub struct McpSlot(Arc<Mutex<Option<(String, McpProcess)>>>);
 
-/// Ambil proses sesuai konfigurasi; restart bila path/node berubah.
+fn config_fingerprint(config: &McpConfig) -> String {
+    let path = std::path::Path::new(&config.index_path);
+    let metadata = std::fs::metadata(path).ok();
+    let length = metadata.as_ref().map(std::fs::Metadata::len).unwrap_or(0);
+    let modified = metadata
+        .and_then(|value| value.modified().ok())
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|value| value.as_nanos())
+        .unwrap_or(0);
+    format!(
+        "{}|{}|{length}|{modified}",
+        config.node,
+        path.canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf())
+            .display()
+    )
+}
+
+/// Ambil proses sesuai konfigurasi; restart bila path, runtime, atau build berubah.
 pub fn acquire(slot: &McpSlot, config: &McpConfig) -> Result<(), String> {
     let mut guard = slot.0.lock().map_err(|_| "MCP slot terkunci.")?;
-    let fingerprint = format!("{}|{}", config.node, config.index_path);
+    let fingerprint = config_fingerprint(config);
     let matches = guard
-        .as_ref()
-        .map(|(f, _)| *f == fingerprint)
+        .as_mut()
+        .map(|(f, process)| *f == fingerprint && process.is_alive())
         .unwrap_or(false);
     if !matches {
         if let Some((_, old)) = guard.as_mut() {
@@ -242,7 +267,10 @@ pub async fn mcp_local_check(
     index_path: String,
     node: String,
 ) -> Result<serde_json::Value, String> {
-    let cfg = McpConfig { index_path: index_path.trim().to_string(), node: node.trim().to_string() };
+    let cfg = McpConfig {
+        index_path: index_path.trim().to_string(),
+        node: node.trim().to_string(),
+    };
     if cfg.index_path.is_empty() {
         return Err("Path belum diisi.".into());
     }

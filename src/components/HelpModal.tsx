@@ -36,7 +36,7 @@ const SECTIONS: { title: string; icon: IconName; items: string[] }[] = [
     items: [
       "Tombol mic di kolom pesan: tahan untuk bicara (push-to-talk) atau klik untuk mulai/berhenti, tergantung mode di Pengaturan.",
       "Hasil pengenalan suara masuk ke kolom pesan dulu — kamu bisa menyuntingnya sebelum dikirim.",
-      "Bahasa utama (Indonesia / English / Otomatis) dan model pengenalan suara dipilih di Pengaturan → Voice.",
+      "Bahasa transkripsi (Indonesia / English / Otomatis) dan model pengenalan suara dipilih di Pengaturan → Voice.",
       "Tombol Bacakan pada pesan assistant membacakan jawaban; Auto-speak membacakan otomatis.",
       "Unduh model suara (Whisper & Piper) dari Pengaturan → Voice. Semuanya diproses lokal.",
     ],
@@ -46,8 +46,8 @@ const SECTIONS: { title: string; icon: IconName; items: string[] }[] = [
     icon: "sparkle",
     items: [
       "Saat butuh data segar, model dapat meminta pencarian web dengan format [CARI: kata kunci] — hasilnya otomatis disuntikkan lalu jawaban dilanjutkan.",
-      "Provider pencarian (DuckDuckGo / Brave / Tavily) diatur di Pengaturan → Pencarian web.",
-      "System prompt, temperature, top-p, dan max tokens dapat disesuaikan di Pengaturan → Gaya jawaban.",
+      "Web Search MCP dipakai lebih dahulu untuk pencarian umum bila dikonfigurasi. DuckDuckGo, Brave, atau Tavily menjadi fallback; berita dan kurs memakai sumber terstruktur khusus.",
+      "System prompt, temperature, top-p, max tokens, serta batas riwayat yang dikirim dapat disesuaikan di Pengaturan → Gaya jawaban.",
       "Gunakan tombol Regenerate pada jawaban terakhir atau ikon edit pada pesanmu untuk iterasi cepat.",
     ],
   },
@@ -57,7 +57,7 @@ const SECTIONS: { title: string; icon: IconName; items: string[] }[] = [
     items: [
       "Atur alamat LM Studio dan pilih model dari Pengaturan.",
       "Percakapan disimpan di database lokal. Screenshot hanya digunakan saat request berlangsung dan tidak disimpan permanen.",
-      "Assistant tidak mengirim data ke cloud; koneksi hanya menuju server yang kamu konfigurasi sendiri.",
+      "Percakapan dikirim ke alamat model yang kamu konfigurasi. Jika pencarian web aktif dan dibutuhkan, kata kunci serta akses halaman juga keluar ke layanan pencarian atau situs terkait.",
     ],
   },
 ];

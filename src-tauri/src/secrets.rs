@@ -33,21 +33,23 @@ pub fn search_keys_get() -> Result<serde_json::Value, String> {
     }))
 }
 
-/// Some(value) = simpan/ubah; None = hapus.
+/// Some(value non-kosong) = simpan/ubah; Some("") = hapus; None = jangan ubah.
+/// Semantik parsial mencegah penyimpanan key satu provider menghapus provider lain.
 #[tauri::command]
-pub fn search_keys_set(
-    brave: Option<String>,
-    tavily: Option<String>,
-) -> Result<(), String> {
-    if let Some(v) = brave.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        set_secret("brave-api-key", v)?;
-    } else {
-        delete_secret("brave-api-key")?;
+pub fn search_keys_set(brave: Option<String>, tavily: Option<String>) -> Result<(), String> {
+    if let Some(v) = brave.as_deref().map(str::trim) {
+        if v.is_empty() {
+            delete_secret("brave-api-key")?;
+        } else {
+            set_secret("brave-api-key", v)?;
+        }
     }
-    if let Some(v) = tavily.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        set_secret("tavily-api-key", v)?;
-    } else {
-        delete_secret("tavily-api-key")?;
+    if let Some(v) = tavily.as_deref().map(str::trim) {
+        if v.is_empty() {
+            delete_secret("tavily-api-key")?;
+        } else {
+            set_secret("tavily-api-key", v)?;
+        }
     }
     Ok(())
 }

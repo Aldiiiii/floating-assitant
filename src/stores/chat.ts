@@ -181,7 +181,13 @@ async function ensureListeners() {
 
   void listen<{ id: number; phase: string; query?: string }>("chat-phase", (e) => {
     if (e.payload.id !== activeRequest) return;
-    useChatStore.setState({ searchPhase: e.payload.phase === "searching" ? e.payload.query : null });
+    useChatStore.setState({
+      searchPhase: e.payload.phase === "searching"
+        ? e.payload.query
+        : e.payload.phase === "verifying"
+          ? "__verifying__"
+          : null,
+    });
   });
 
   void listen<ErrorEvent>("chat-error", (e) => {
