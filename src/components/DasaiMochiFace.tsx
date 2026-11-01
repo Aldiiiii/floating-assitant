@@ -67,7 +67,7 @@ export function DasaiMochiFace({ isHovered = false }: DasaiMochiFaceProps) {
     active === "look-left" ? -5 : active === "look-right" ? 5 : 0;
 
   return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-[#080906] select-none shadow-[inset_0_2px_4px_rgba(255,255,255,0.25),0_10px_28px_rgba(0,0,0,0.65)]">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-[#080906] select-none shadow-[inset_0_2px_4px_rgba(255,255,255,0.25)]">
       {/* Cincin Lingkar Luar Cyber Glow (Neon Lime Accents) */}
       <div className="pointer-events-none absolute inset-0 rounded-full border-[2px] border-[#c8f16b]/50 shadow-[0_0_15px_rgba(200,241,107,0.35),inset_0_0_8px_rgba(200,241,107,0.2)]" />
 

@@ -24,7 +24,7 @@ export function Bubble({ onExpand }: BubbleProps) {
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       title="Astra Cyber Pet · Klik untuk membuka · Tahan atau geser untuk memindahkan"
-      className="assistant-bubble relative flex h-16 w-16 cursor-grab select-none items-center justify-center rounded-full bg-[#080906] p-[1.5px] shadow-[0_12px_36px_rgba(0,0,0,0.7)] outline-none transition-transform hover:scale-[1.06] active:cursor-grabbing active:scale-[0.95]"
+      className="assistant-bubble relative flex h-16 w-16 cursor-grab select-none items-center justify-center rounded-full bg-[#080906] p-[1.5px] border border-white/10 shadow-none outline-none transition-transform hover:scale-[1.06] active:cursor-grabbing active:scale-[0.95]"
     >
       <DasaiMochiFace isHovered={isHovered} />
     </div>

@@ -1,14 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Bubble } from "./components/Bubble";
-import { ChatPanel } from "./components/ChatPanel";
-import { changeMode, restoreStartup, watchPosition, type Mode } from "./lib/window";
+import { SpeechBalloonView } from "./components/SpeechBalloonView";
+import {
+  changeMode,
+  restoreStartup,
+  watchPosition,
+  type DockSide,
+  type Mode,
+} from "./lib/window";
 import { useChatStore } from "./stores/chat";
 import { useSettingsStore } from "./stores/settings";
 import { useVoiceStore } from "./stores/voice";
 
 function App() {
   const [mode, setMode] = useState<Mode>("bubble");
+  const [dock, setDock] = useState<DockSide>({
+    side: "right",
+    vertical: "bottom",
+  });
   const initSettings = useSettingsStore((s) => s.init);
   const initChat = useChatStore((s) => s.init);
   const initVoice = useVoiceStore((s) => s.init);
@@ -22,8 +32,11 @@ function App() {
   useEffect(() => {
     let active = true;
     let unlisten: (() => void) | undefined;
-    void restoreStartup().then((m) => {
-      if (active) setMode(m);
+    void restoreStartup().then(({ mode: m, dock: d }) => {
+      if (active) {
+        setMode(m);
+        setDock(d);
+      }
     });
     void watchPosition().then((u) => {
       if (!active) u();
@@ -36,14 +49,15 @@ function App() {
   }, []);
 
   const expand = useCallback(async () => {
-    await changeMode("chat", { focus: true });
+    const nextDock = await changeMode("chat", { focus: true });
+    setDock(nextDock);
     setMode("chat");
   }, []);
 
   const collapse = useCallback(async () => {
-    await changeMode("bubble");
+    await changeMode("bubble", { dock });
     setMode("bubble");
-  }, []);
+  }, [dock]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -61,7 +75,11 @@ function App() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-transparent">
-      {mode === "bubble" ? <Bubble onExpand={expand} /> : <ChatPanel onClose={collapse} />}
+      {mode === "bubble" ? (
+        <Bubble onExpand={expand} />
+      ) : (
+        <SpeechBalloonView onClose={collapse} dock={dock} />
+      )}
     </div>
   );
 }

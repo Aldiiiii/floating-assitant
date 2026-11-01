@@ -304,6 +304,11 @@ async function refreshConversations() {
   useChatStore.setState({ conversations });
 }
 
+function shouldAutoSpeak(): boolean {
+  const vs = useVoiceStore.getState();
+  return vs.autoSpeak || (vs.mode === "dialog" && vs.dialogActive);
+}
+
 async function ensureListeners() {
   if (listenersStarted) return;
   listenersStarted = true;
@@ -313,8 +318,7 @@ async function ensureListeners() {
     useChatStore.setState((s) => ({
       messages: mutateLastAssistant(s.messages, (m) => {
         const nextContent = m.content + e.payload.delta;
-        const vs = useVoiceStore.getState();
-        if (vs.autoSpeak || vs.mode === "dialog") {
+        if (shouldAutoSpeak()) {
           speechStreamManager.feed(nextContent, false, e.payload.id);
         }
         return {
@@ -351,7 +355,7 @@ async function ensureListeners() {
       useChatStore.setState({ streaming: false, searchPhase: null, messages });
       void refreshConversations();
       const vs = useVoiceStore.getState();
-      const shouldSpeak = vs.autoSpeak || vs.mode === "dialog";
+      const shouldSpeak = shouldAutoSpeak();
       if (shouldSpeak) {
         speechStreamManager.feed(content, true, e.payload.id);
       } else if (vs.mode === "dialog" && vs.dialogActive) {
@@ -376,8 +380,7 @@ async function ensureListeners() {
     useChatStore.setState((s) => ({
       messages: mutateLastAssistant(s.messages, (m) => ({ ...m, content: "" })),
     }));
-    const vs = useVoiceStore.getState();
-    if (vs.autoSpeak || vs.mode === "dialog") {
+    if (shouldAutoSpeak()) {
       speechStreamManager.start(e.payload.id);
     }
   });
@@ -621,8 +624,7 @@ async function runAssistant(imageParts?: unknown) {
 
   const reqId = ++requestSeq;
   activeRequest = reqId;
-  const vs = useVoiceStore.getState();
-  if (vs.autoSpeak || vs.mode === "dialog") {
+  if (shouldAutoSpeak()) {
     speechStreamManager.start(reqId);
   }
   useChatStore.setState((s) => ({
