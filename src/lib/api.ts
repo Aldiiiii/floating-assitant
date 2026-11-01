@@ -105,8 +105,29 @@ export interface TranscriptPayload {
   duration_ms: number;
 }
 
-export function voiceStart(deviceName?: string | null): Promise<void> {
-  return invoke("voice_start", { deviceName: deviceName ?? null });
+export interface StreamChunkPayload {
+  text: string;
+  is_final: boolean;
+}
+
+export function voiceStart(
+  deviceName?: string | null,
+  modelKey?: string | null,
+  language?: string | null,
+  stream?: boolean,
+  autoStop?: boolean,
+  silenceMs?: number,
+  sensitivity?: string | null,
+): Promise<void> {
+  return invoke("voice_start", {
+    deviceName: deviceName ?? null,
+    modelKey: modelKey ?? null,
+    language: language ?? null,
+    stream: stream ?? true,
+    autoStop: autoStop ?? false,
+    silenceMs: silenceMs ?? null,
+    sensitivity: sensitivity ?? null,
+  });
 }
 
 export function audioDevices(): Promise<string[]> {
@@ -125,12 +146,14 @@ export function ttsSpeak(
   voice: string,
   speakerDevice?: string | null,
   speed?: number,
+  enqueue?: boolean,
 ): Promise<void> {
   return invoke("tts_speak", {
     text,
     voice,
     speakerDevice: speakerDevice ?? null,
     speed: speed ?? 1,
+    enqueue: enqueue ?? false,
   });
 }
 

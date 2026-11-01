@@ -600,6 +600,99 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+fn decode_bing_url(url: &str) -> String {
+    if let Some(pos) = url.find("u=a1") {
+        let after = &url[pos + 4..];
+        let end = after.find('&').unwrap_or(after.len());
+        let raw = &after[..end];
+
+        use base64::Engine;
+        let mut b64 = raw.replace('-', "+").replace('_', "/");
+        while b64.len() % 4 != 0 {
+            b64.push('=');
+        }
+
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&b64) {
+            if let Ok(decoded_str) = String::from_utf8(bytes) {
+                if decoded_str.starts_with("http://") || decoded_str.starts_with("https://") {
+                    return decoded_str;
+                }
+            }
+        }
+    }
+    url.to_string()
+}
+
+/// Bing Web Search — Gratis tanpa API key, lancar diakses di Indonesia (bebas blokir Kominfo).
+pub async fn bing_search(query: &str) -> Result<Vec<SearchResult>, String> {
+    let url = reqwest::Url::parse_with_params(
+        "https://www.bing.com/search",
+        &[
+            ("q", query),
+            ("mkt", "id-ID"),
+            ("setlang", "id-ID"),
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let resp = client()?
+        .get(url)
+        .header("Accept-Language", "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7")
+        .send()
+        .await
+        .map_err(|e| format!("Bing Search: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Bing Search merespons {}.", resp.status()));
+    }
+
+    let html = resp.text().await.map_err(|e| e.to_string())?;
+    let document = scraper::Html::parse_document(&html);
+    let item_sel = scraper::Selector::parse("li.b_algo").map_err(|e| format!("{e:?}"))?;
+    let title_sel = scraper::Selector::parse("h2 a").map_err(|e| format!("{e:?}"))?;
+    let snippet_sel = scraper::Selector::parse("p").map_err(|e| format!("{e:?}"))?;
+
+    let mut results = Vec::new();
+    for item in document.select(&item_sel) {
+        let Some(title_el) = item.select(&title_sel).next() else {
+            continue;
+        };
+        let Some(raw_url) = title_el.value().attr("href") else {
+            continue;
+        };
+        let title = clean_text(&title_el.text().collect::<String>());
+        if title.is_empty() {
+            continue;
+        }
+
+        let snippet = item
+            .select(&snippet_sel)
+            .next()
+            .map(|p| clean_text(&p.text().collect::<String>()))
+            .unwrap_or_else(|| {
+                let full = clean_text(&item.text().collect::<String>());
+                full.strip_prefix(&title).map(clean_text).unwrap_or(full)
+            });
+
+        let clean_url = decode_bing_url(raw_url);
+        results.push(SearchResult {
+            title,
+            url: clean_url,
+            snippet,
+        });
+
+        if results.len() >= 5 {
+            break;
+        }
+    }
+
+    if results.is_empty() {
+        return Err("Bing tidak menemukan hasil pencarian.".into());
+    }
+
+    Ok(results)
+}
+
 async fn brave_search(query: &str) -> Result<Vec<SearchResult>, String> {
     let Some(key) = secrets::get("brave-api-key").filter(|k| !k.trim().is_empty()) else {
         return Err("API key Brave belum diisi.
@@ -1342,16 +1435,23 @@ mod tests {
             true
         ));
     }
+
+    #[test]
+    fn test_decode_bing_url() {
+        let redirect = "https://www.bing.com/ck/a?!&&p=56a42fc3283ca53e3b61e3cdf881ac0613761a586d424b4533865ca7fb9682e3JmltdHM9MTc5MjU0MDgwMA&ptn=3&ver=2&hsh=4&fclid=2b323ba8-ddc4-6223-11be-2c52dcf36355&u=a1aHR0cHM6Ly93d3cubG9nYW1tdWxpYS5jb20vaWQvaGFyZ2EtZW1hcy1oYXJpLWluaQ&ntb=1";
+        let decoded = decode_bing_url(redirect);
+        assert_eq!(decoded, "https://www.logammulia.com/id/harga-emas-hari-ini");
+    }
 }
 
 /// Coba provider terpilih lalu fallback ke provider lain bila gagal
-/// (kecuali yang membutuhkan key namun key kosong).
+/// (provider berbayar yang tidak memiliki key otomatis dilewati agar tidak memicu error API key).
 pub async fn search_with_fallback(
     ctx: &SearchContext<'_>,
     slot: &McpSlot,
     query: &str,
 ) -> (Vec<SearchResult>, Option<String>) {
-    const ORDER: [&str; 3] = ["ddg", "brave", "tavily"];
+    const ORDER: [&str; 4] = ["bing", "ddg", "brave", "tavily"];
     let mut last_error: Option<String> = None;
 
     // Prioritas tertinggi: Web Search MCP lokal bila dikonfigurasi.
@@ -1375,6 +1475,24 @@ pub async fn search_with_fallback(
     }
 
     for name in ordered.into_iter() {
+        // Lewati provider berbayar jika API key belum diisi, kecuali pengguna secara eksplisit memilihnya
+        if name == "brave"
+            && secrets::get("brave-api-key")
+                .map(|k| k.trim().is_empty())
+                .unwrap_or(true)
+            && ctx.provider != "brave"
+        {
+            continue;
+        }
+        if name == "tavily"
+            && secrets::get("tavily-api-key")
+                .map(|k| k.trim().is_empty())
+                .unwrap_or(true)
+            && ctx.provider != "tavily"
+        {
+            continue;
+        }
+
         match search(name, query).await {
             Ok(results) if !results.is_empty() => return (results, None),
             Ok(_) => {
@@ -1387,7 +1505,7 @@ pub async fn search_with_fallback(
     }
     (
         Vec::new(),
-        Some(last_error.unwrap_or_else(|| "Tidak ada provider pencarian.".into())),
+        Some(last_error.unwrap_or_else(|| "Tidak ada provider pencarian yang berhasil.".into())),
     )
 }
 
@@ -1397,8 +1515,10 @@ pub async fn search(provider: &str, query: &str) -> Result<Vec<SearchResult>, St
         return Err("Query pencarian kosong.".into());
     }
     match provider {
+        "bing" => bing_search(query).await,
         "brave" => brave_search(query).await,
         "tavily" => tavily_search(query).await,
-        _ => ddg_search(query).await,
+        "ddg" => ddg_search(query).await,
+        _ => bing_search(query).await,
     }
 }

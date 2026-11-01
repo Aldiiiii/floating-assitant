@@ -9,7 +9,7 @@ import {
 } from "../lib/api";
 import { db, type ConversationRow, type SourceRef } from "../lib/db";
 import { DEFAULT_SYSTEM_PROMPT, useSettingsStore } from "./settings";
-import { useVoiceStore } from "./voice";
+import { setSpeechStreamActive, useVoiceStore } from "./voice";
 
 export type Role = "user" | "assistant";
 
@@ -75,6 +75,188 @@ let requestSeq = 0;
 let activeRequest = -1;
 let pendingSources: SourceRef[] | null = null;
 
+export function extractSpeakableText(raw: string, isFinal = false): string {
+  if (!raw) return "";
+  let cleaned = raw
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<thought>[\s\S]*?<\/thought>/gi, "")
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
+    .replace(/<think>[\s\S]*/gi, "")
+    .replace(/<thought>[\s\S]*/gi, "")
+    .replace(/<reasoning>[\s\S]*/gi, "");
+
+  // Hanya jika streaming sudah selesai total (isFinal) DAN tidak ada teks sama sekali di luar tag:
+  if (isFinal && !cleaned.trim()) {
+    cleaned = raw.replace(/<\/?(think|thought|reasoning)>/gi, "");
+  }
+
+  // Conversational UX: "Writing for Ears, Not Eyes"
+  // 1. Ganti blok kode lengkap atau unclosed dengan frasa lisan ramah
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, " (kode terlampir di layar) ");
+  cleaned = cleaned.replace(/```[\s\S]*/g, " (kode terlampir di layar) ");
+
+  // 2. Format markdown link [Label](url) -> sebutkan Label saja
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+
+  // 3. Buang URL mentah agar tidak dieja huruf per huruf
+  cleaned = cleaned.replace(/https?:\/\/[^\s)\]]+/gi, " ");
+
+  // 4. Buang karakter formatting markdown
+  cleaned = cleaned
+    .replace(/[*_#`|>~]/g, " ")
+    .replace(/\s+/g, " ");
+
+  return cleaned.trim();
+}
+
+export function extractNextSentence(
+  text: string,
+  isDone: boolean,
+): { sentence: string; length: number } | null {
+  const trimmed = text.trimStart();
+  const leadingSpaces = text.length - trimmed.length;
+  if (!trimmed) return null;
+
+  // 1. Tanda baca kalimat (. ! ?) yang diikuti spasi/newline
+  let searchFrom = 0;
+  while (searchFrom < trimmed.length) {
+    const sub = trimmed.slice(searchFrom);
+    const m = sub.match(/^([^.!?\n]+[.!?]+(?:\s+|\n+))/);
+    if (!m) break;
+    const candidate = trimmed.slice(0, searchFrom + m[1].length);
+    const candidateTrimmed = candidate.trim();
+    // Jika hanya nomor urut (misal "1." atau "2."), gabungkan dengan kalimat setelahnya
+    if (/^\d+\.?$/.test(candidateTrimmed) || candidateTrimmed.length < 3) {
+      searchFrom += m[1].length;
+      continue;
+    }
+    return {
+      sentence: candidateTrimmed,
+      length: leadingSpaces + candidate.length,
+    };
+  }
+
+  // 2. Baris baru / pemisah paragraf (\n+)
+  const matchNewline = trimmed.match(/^([^\n]+\n+)/);
+  if (matchNewline) {
+    const candidate = matchNewline[1].trim();
+    if (candidate.length >= 2) {
+      return {
+        sentence: candidate,
+        length: leadingSpaces + matchNewline[1].length,
+      };
+    }
+  }
+
+  // 3. Kalimat panjang tanpa titik (> 100 karakter), potong pada koma/titik dua terdekat
+  if (trimmed.length > 100) {
+    const matchClause = trimmed.match(/^([^,;:\n]{40,}[,;:]\s+)/);
+    if (matchClause) {
+      return {
+        sentence: matchClause[1].trim(),
+        length: leadingSpaces + matchClause[1].length,
+      };
+    }
+  }
+
+  // 4. Jika stream sudah selesai (isDone), konsumsi semua sisa teks
+  if (isDone && trimmed.length > 0) {
+    return {
+      sentence: trimmed.trim(),
+      length: text.length,
+    };
+  }
+
+  return null;
+}
+
+class SpeechStreamManager {
+  private chain: Promise<void> = Promise.resolve();
+  private spokenOffset = 0;
+  private sentenceIndex = 0;
+  private stopped = false;
+  private requestId = -1;
+
+  start(reqId: number) {
+    this.stopped = false;
+    this.chain = Promise.resolve();
+    this.spokenOffset = 0;
+    this.sentenceIndex = 0;
+    this.requestId = reqId;
+    setSpeechStreamActive(true);
+  }
+
+  stop() {
+    this.stopped = true;
+    this.requestId = -1;
+    this.chain = Promise.resolve();
+    setSpeechStreamActive(false);
+  }
+
+  feed(rawText: string, isDone: boolean, reqId: number) {
+    if (this.stopped || reqId !== this.requestId) return;
+
+    const speakable = extractSpeakableText(rawText, isDone);
+    let remaining = speakable.slice(this.spokenOffset);
+
+    while (remaining.length > 0) {
+      const next = extractNextSentence(remaining, isDone);
+      if (!next) break;
+
+      this.spokenOffset += next.length;
+      remaining = speakable.slice(this.spokenOffset);
+
+      const sentenceToSpeak = next.sentence;
+      if (!sentenceToSpeak) continue;
+
+      const isFirst = this.sentenceIndex === 0;
+      this.sentenceIndex++;
+
+      this.chain = this.chain
+        .then(async () => {
+          if (this.stopped || reqId !== this.requestId) return;
+          const vs = useVoiceStore.getState();
+          await vs.speak(sentenceToSpeak, !isFirst);
+        })
+        .catch((err) => {
+          console.error("[speechStreamManager]", err);
+        });
+    }
+
+    if (isDone) {
+      this.chain = this.chain.finally(() => {
+        if (reqId === this.requestId) {
+          setSpeechStreamActive(false);
+        }
+      });
+    }
+  }
+}
+
+export const speechStreamManager = new SpeechStreamManager();
+
+export function speakFullText(text: string) {
+  const reqId = ++requestSeq;
+  speechStreamManager.start(reqId);
+  speechStreamManager.feed(text, true, reqId);
+}
+
+export function extractFirstSentences(text: string, maxSentences = 2): string {
+  if (!text) return "";
+  const trimmed = text.trim();
+  const matches = trimmed.match(/[^.!?\n]+[.!?\n]+(\s|$)/g);
+  if (matches && matches.length > 0) {
+    const selected = matches.slice(0, maxSentences).join("").trim();
+    if (selected.length > 0) return selected;
+  }
+  if (trimmed.length > 160) {
+    const cut = trimmed.slice(0, 160);
+    const lastSpace = cut.lastIndexOf(" ");
+    return (lastSpace > 60 ? cut.slice(0, lastSpace) : cut) + "...";
+  }
+  return trimmed;
+}
+
 export function estimateTokens(text: string): number {
   // Heuristik lintas bahasa: ~4 karakter per token.
   return Math.ceil(text.length / 4);
@@ -129,10 +311,17 @@ async function ensureListeners() {
   void listen<ChunkEvent>("chat-chunk", (e) => {
     if (e.payload.id !== activeRequest) return;
     useChatStore.setState((s) => ({
-      messages: mutateLastAssistant(s.messages, (m) => ({
-        ...m,
-        content: m.content + e.payload.delta,
-      })),
+      messages: mutateLastAssistant(s.messages, (m) => {
+        const nextContent = m.content + e.payload.delta;
+        const vs = useVoiceStore.getState();
+        if (vs.autoSpeak || vs.mode === "dialog") {
+          speechStreamManager.feed(nextContent, false, e.payload.id);
+        }
+        return {
+          ...m,
+          content: nextContent,
+        };
+      }),
     }));
   });
 
@@ -161,8 +350,17 @@ async function ensureListeners() {
       messages = dropTrailingEmptyAssistant(messages);
       useChatStore.setState({ streaming: false, searchPhase: null, messages });
       void refreshConversations();
-      if (useVoiceStore.getState().autoSpeak && content.trim() !== "") {
-        void useVoiceStore.getState().speak(content).catch(() => undefined);
+      const vs = useVoiceStore.getState();
+      const shouldSpeak = vs.autoSpeak || vs.mode === "dialog";
+      if (shouldSpeak) {
+        speechStreamManager.feed(content, true, e.payload.id);
+      } else if (vs.mode === "dialog" && vs.dialogActive) {
+        setTimeout(() => {
+          const cur = useVoiceStore.getState();
+          if (cur.mode === "dialog" && cur.dialogActive && cur.state === "idle" && !cur.speaking) {
+            void cur.startRecording().catch(() => undefined);
+          }
+        }, 350);
       }
     }
   });
@@ -174,9 +372,14 @@ async function ensureListeners() {
 
   void listen<{ id: number }>("chat-reset", (e) => {
     if (e.payload.id !== activeRequest) return;
+    speechStreamManager.stop();
     useChatStore.setState((s) => ({
       messages: mutateLastAssistant(s.messages, (m) => ({ ...m, content: "" })),
     }));
+    const vs = useVoiceStore.getState();
+    if (vs.autoSpeak || vs.mode === "dialog") {
+      speechStreamManager.start(e.payload.id);
+    }
   });
 
   void listen<{ id: number; phase: string; query?: string }>("chat-phase", (e) => {
@@ -193,6 +396,8 @@ async function ensureListeners() {
   void listen<ErrorEvent>("chat-error", (e) => {
     if (e.payload.id !== activeRequest) return;
     activeRequest = -1;
+    speechStreamManager.stop();
+    useVoiceStore.getState().stopSpeaking();
     useChatStore.setState((s) => ({
       streaming: false,
       searchPhase: null,
@@ -360,6 +565,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setEditDraft: (v) => set({ editDraft: v }),
 
   stop: () => {
+    speechStreamManager.stop();
+    useVoiceStore.getState().stopSpeaking();
     if (activeRequest > 0) void chatCancel(activeRequest);
   },
 }));
@@ -414,6 +621,10 @@ async function runAssistant(imageParts?: unknown) {
 
   const reqId = ++requestSeq;
   activeRequest = reqId;
+  const vs = useVoiceStore.getState();
+  if (vs.autoSpeak || vs.mode === "dialog") {
+    speechStreamManager.start(reqId);
+  }
   useChatStore.setState((s) => ({
     streaming: true,
     messages: [...s.messages, { role: "assistant", content: "" }],

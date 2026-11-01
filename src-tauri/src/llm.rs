@@ -85,12 +85,18 @@ struct CompletionChunk {
 struct CompletionChoice {
     #[serde(default)]
     delta: Delta,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
 struct Delta {
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
     #[serde(default)]
     tool_calls: Vec<ToolCallDelta>,
 }
@@ -113,7 +119,8 @@ struct ToolFunctionDelta {
 
 enum SseLine {
     Delta(String),
-    Done,
+    Reasoning(String),
+    Done(Option<String>),
     Ignore,
 }
 
@@ -123,16 +130,29 @@ fn parse_sse_line(line: &str) -> SseLine {
     };
     let data = data.trim();
     if data.is_empty() || data == "[DONE]" {
-        return SseLine::Done;
+        return SseLine::Done(None);
     }
     match serde_json::from_str::<CompletionChunk>(data) {
-        Ok(chunk) => chunk
-            .choices
-            .first()
-            .and_then(|c| c.delta.content.clone())
-            .filter(|d| !d.is_empty())
-            .map(SseLine::Delta)
-            .unwrap_or(SseLine::Ignore),
+        Ok(chunk) => {
+            if let Some(c) = chunk.choices.first() {
+                if let Some(content) = &c.delta.content {
+                    if !content.is_empty() {
+                        return SseLine::Delta(content.clone());
+                    }
+                }
+                if let Some(reasoning) = c.delta.reasoning_content.as_ref().or(c.delta.reasoning.as_ref()) {
+                    if !reasoning.is_empty() {
+                        return SseLine::Reasoning(reasoning.clone());
+                    }
+                }
+                if let Some(reason) = &c.finish_reason {
+                    if reason == "stop" || reason == "length" {
+                        return SseLine::Done(Some(reason.clone()));
+                    }
+                }
+            }
+            SseLine::Ignore
+        }
         // Baris komentar/keep-alive yang tidak valid JSON diabaikan.
         Err(_) => SseLine::Ignore,
     }
@@ -177,6 +197,7 @@ async fn stream_once(
     collected: &mut String,
     suppressed_out: &mut String,
     native_tool: &mut NativeToolCall,
+    finish_reason_out: &mut Option<String>,
     enable_native_tools: bool,
     emit_chunks: bool,
 ) -> Result<(), String> {
@@ -243,6 +264,7 @@ async fn stream_once(
     ];
     let mut mode: u8 = 0; // 0=detecting 1=normal 2=suppressed
     let mut pending = String::new();
+    let mut in_reasoning = false;
 
     loop {
         tokio::select! {
@@ -264,7 +286,27 @@ async fn stream_once(
                             }
                         }
                         match parse_sse_line(trimmed_line) {
+                            SseLine::Reasoning(reasoning) => {
+                                if !in_reasoning {
+                                    in_reasoning = true;
+                                    collected.push_str("<think>\n");
+                                    if emit_chunks {
+                                        let _ = app.emit("chat-chunk", ChunkPayload { id, delta: "<think>\n".into() });
+                                    }
+                                }
+                                collected.push_str(&reasoning);
+                                if emit_chunks {
+                                    let _ = app.emit("chat-chunk", ChunkPayload { id, delta: reasoning });
+                                }
+                            }
                             SseLine::Delta(delta) => {
+                                if in_reasoning {
+                                    in_reasoning = false;
+                                    collected.push_str("\n</think>\n\n");
+                                    if emit_chunks {
+                                        let _ = app.emit("chat-chunk", ChunkPayload { id, delta: "\n</think>\n\n".into() });
+                                    }
+                                }
                                 collected.push_str(&delta);
                                 match mode {
                                     1 => {
@@ -276,36 +318,53 @@ async fn stream_once(
                                             if emit_chunks {
                                                 let _ = app.emit("chat-reset", ResetPayload { id });
                                             }
-                                        } else {
-                                            if emit_chunks {
-                                                let _ = app.emit("chat-chunk", ChunkPayload { id, delta });
-                                            }
+                                        } else if emit_chunks {
+                                            let _ = app.emit("chat-chunk", ChunkPayload { id, delta });
                                         }
                                     }
                                     2 => pending.push_str(&delta),
                                     _ => {
                                         pending.push_str(&delta);
                                         let candidate = pending.trim_start();
-                                        let tool_like = TOOL_PATTERNS.iter().any(|p| {
-                                            p.starts_with(candidate) || candidate.starts_with(p)
-                                        });
-                                        if tool_like {
-                                            mode = 2;
+                                        if candidate.is_empty() {
+                                            // Whitespace di awal baris, tetap buffer di mode 0
                                         } else {
-                                            mode = 1;
-                                            if emit_chunks {
-                                                let _ = app.emit(
-                                                    "chat-chunk",
-                                                    ChunkPayload { id, delta: pending.clone() },
-                                                );
+                                            let exact_tool = TOOL_PATTERNS.iter().any(|p| candidate.starts_with(p));
+                                            if exact_tool {
+                                                mode = 2;
+                                            } else {
+                                                let possible_prefix = candidate.len() < 30 && TOOL_PATTERNS.iter().any(|p| p.starts_with(candidate));
+                                                if !possible_prefix {
+                                                    mode = 1;
+                                                    if emit_chunks {
+                                                        let _ = app.emit(
+                                                            "chat-chunk",
+                                                            ChunkPayload { id, delta: pending.clone() },
+                                                        );
+                                                    }
+                                                    pending.clear();
+                                                }
                                             }
-                                            pending.clear();
                                         }
                                     }
                                 }
                             }
-                            SseLine::Done => {
-                                if mode == 2 {
+                            SseLine::Done(reason) => {
+                                if in_reasoning {
+                                    collected.push_str("\n</think>\n");
+                                    if emit_chunks {
+                                        let _ = app.emit("chat-chunk", ChunkPayload { id, delta: "\n</think>\n".into() });
+                                    }
+                                }
+                                if let Some(r) = reason {
+                                    *finish_reason_out = Some(r);
+                                }
+                                if mode == 0 && !pending.is_empty() {
+                                    if emit_chunks {
+                                        let _ = app.emit("chat-chunk", ChunkPayload { id, delta: pending.clone() });
+                                    }
+                                    pending.clear();
+                                } else if mode == 2 {
                                     *suppressed_out = collected.clone();
                                 }
                                 return Ok(());
@@ -316,7 +375,18 @@ async fn stream_once(
                 }
                 Some(Err(e)) => return Err(format!("Koneksi ke AI Server terputus: {e}")),
                 None => {
-                    if mode == 2 {
+                    if in_reasoning {
+                        collected.push_str("\n</think>\n");
+                        if emit_chunks {
+                            let _ = app.emit("chat-chunk", ChunkPayload { id, delta: "\n</think>\n".into() });
+                        }
+                    }
+                    if mode == 0 && !pending.is_empty() {
+                        if emit_chunks {
+                            let _ = app.emit("chat-chunk", ChunkPayload { id, delta: pending.clone() });
+                        }
+                        pending.clear();
+                    } else if mode == 2 {
                         *suppressed_out = collected.clone();
                     }
                     return Ok(());
@@ -781,13 +851,16 @@ fn supplemental_search_query(query: &str, request: &str) -> String {
     if requires_authoritative_sources(request) {
         format!("{query} sumber resmi site:go.id")
     } else {
-        format!("{query} official source")
+        format!("{query} rekomendasi ulasan")
     }
 }
 
 fn temporal_system_context() -> String {
     format!(
-        "Konteks waktu sistem: sekarang {} (waktu lokal perangkat). Untuk permintaan terbaru/terkini, gunakan tanggal ini dan jangan menebak tahun dari pengetahuan model.",
+        "Konteks waktu sistem: sekarang {} (waktu lokal perangkat). Untuk permintaan terbaru/terkini, gunakan tanggal ini dan jangan menebak tahun dari pengetahuan model.\n\
+         Aturan semantik & pencarian:\n\
+         - Dalam konteks AI, komputasi, software, library, dan model: 'lokal' berarti on-device/offline/self-hosted (bukan geografis Indonesia).\n\
+         - Untuk pencarian teknis, library, open-source, atau riset komunitas (Reddit, Hacker News, GitHub, dsb.), susun kata kunci pencarian (query) dalam bahasa Inggris teknis tanpa kata 'Indonesia' kecuali diminta eksplisit.",
         Local::now().format("%Y-%m-%d %H:%M:%S %:z")
     )
 }
@@ -832,16 +905,97 @@ fn normalize_current_query(query: &str, user_request: &str) -> String {
     normalized
 }
 
+fn sanitize_technical_query(query: &str, user_request: &str) -> String {
+    let req_lower = user_request.to_lowercase();
+    let user_mentions_indonesia = [
+        "indonesia",
+        "tanah air",
+        "dalam negeri",
+        "di indonesia",
+    ]
+    .iter()
+    .any(|marker| req_lower.contains(marker));
+
+    if user_mentions_indonesia {
+        return query.to_string();
+    }
+
+    let q_lower = query.to_lowercase();
+    let is_technical = [
+        "stt",
+        "tts",
+        "llm",
+        "ai",
+        "whisper",
+        "speech",
+        "voice",
+        "model",
+        "library",
+        "framework",
+        "open-source",
+        "open source",
+        "reddit",
+        "hacker news",
+        "hackernews",
+        "hn",
+        "github",
+    ]
+    .iter()
+    .any(|marker| req_lower.contains(marker) || q_lower.contains(marker));
+
+    if !is_technical {
+        return query.to_string();
+    }
+
+    let tokens: Vec<&str> = query.split_whitespace().collect();
+    let mut cleaned_tokens = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        let t = tokens[i];
+        let lower = t.to_lowercase();
+        let stripped = lower.trim_matches(|c: char| !c.is_alphanumeric());
+
+        if (stripped == "lokal" || stripped == "local") && i + 1 < tokens.len() {
+            let next_stripped = tokens[i + 1]
+                .to_lowercase()
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_string();
+            if next_stripped == "indonesia" {
+                cleaned_tokens.push("local");
+                cleaned_tokens.push("offline");
+                i += 2;
+                continue;
+            }
+        }
+        if stripped == "indonesia" {
+            i += 1;
+            continue;
+        }
+        if stripped == "lokal" {
+            cleaned_tokens.push("local");
+            i += 1;
+            continue;
+        }
+        cleaned_tokens.push(t);
+        i += 1;
+    }
+    cleaned_tokens.join(" ")
+}
+
 fn normalize_tool_time(tool: ModelTool, user_request: &str) -> ModelTool {
+    let normalize = |q: &str| {
+        let sanitized = sanitize_technical_query(q, user_request);
+        normalize_current_query(&sanitized, user_request)
+    };
     match tool {
         ModelTool::WebSearch { query } => ModelTool::WebSearch {
-            query: normalize_current_query(&query, user_request),
+            query: normalize(&query),
         },
         ModelTool::DeepSearch { query } => ModelTool::DeepSearch {
-            query: normalize_current_query(&query, user_request),
+            query: normalize(&query),
         },
         ModelTool::NewsSearch { query, limit } => ModelTool::NewsSearch {
-            query: normalize_current_query(&query, user_request),
+            query: normalize(&query),
             limit,
         },
         other => other,
@@ -1234,7 +1388,6 @@ pub async fn chat_stream(
     let mut iteration: u32 = 0;
     let mut finished_cleanly = false;
     let mut flattened_retry_used = false;
-    let mut grounding_retry_used = false;
     let mut native_tools_enabled = web_search_enabled;
     let mut last_sources: Vec<crate::web_search::SearchResult> = Vec::new();
 
@@ -1248,7 +1401,8 @@ pub async fn chat_stream(
         let mut collected = String::new();
         let mut suppressed = String::new();
         let mut native_call = NativeToolCall::default();
-        let emit_live = last_sources.is_empty();
+        let mut finish_reason: Option<String> = None;
+        let emit_live = true;
         let skip_generation = iteration == 0 && forced_tool.is_some();
         let factual_gen = GenerationParams {
             temperature: if iteration > 0 {
@@ -1274,6 +1428,7 @@ pub async fn chat_stream(
                 &mut collected,
                 &mut suppressed,
                 &mut native_call,
+                &mut finish_reason,
                 native_tools_enabled && iteration < MAX_SEARCH_ITERATIONS,
                 emit_live,
             )
@@ -1344,52 +1499,36 @@ pub async fn chat_stream(
             } else {
                 suppressed.clone()
             };
-            if !last_sources.is_empty() && !emit_live {
-                let issues = grounding_issues(&display_text, &last_sources);
-                if !issues.is_empty() && !grounding_retry_used {
-                    eprintln!(
-                        "[astra:web] grounding_retry issues={}",
-                        truncate(&issues.join("; "), 500)
-                    );
-                    grounding_retry_used = true;
-                    convo.push(ChatMessage {
-                        role: "assistant".into(),
-                        content: serde_json::Value::String(display_text),
-                        tool_calls: None,
-                        tool_call_id: None,
-                    });
-                    convo.push(ChatMessage {
-                        role: "user".into(),
-                        content: serde_json::Value::String(format!(
-                            "Draft ditolak oleh grounding gate: {}. Tulis ulang jawaban dari evidence yang sama. Setiap klaim faktual harus memiliki citation valid pada paragraf yang sama. Jangan membuat klaim negatif kecuali frasa negatif tersebut dinyatakan sumber.",
-                            issues.join("; ")
-                        )),
-                        tool_calls: None,
-                        tool_call_id: None,
-                    });
-                    iteration += 1;
-                    continue;
-                }
-                if !issues.is_empty() {
-                    eprintln!(
-                        "[astra:web] grounding_warning_after_retry issues={}",
-                        truncate(&issues.join("; "), 500)
-                    );
-                }
-                let _ = app.emit(
-                    "chat-chunk",
-                    ChunkPayload {
-                        id,
-                        delta: display_text,
-                    },
-                );
-            } else if !suppressed.is_empty() {
-                // Bukan tool call — bila ada teks yang tertahan supresi, tampilkan.
+            if !suppressed.is_empty() && emit_live {
+                // Teks sempat tertahan supresi tapi bukan tool call — tampilkan.
                 let _ = app.emit(
                     "chat-chunk",
                     ChunkPayload {
                         id,
                         delta: suppressed.clone(),
+                    },
+                );
+            }
+            if !last_sources.is_empty() {
+                let issues = grounding_issues(&display_text, &last_sources);
+                if !issues.is_empty() {
+                    eprintln!(
+                        "[astra:web] grounding_advisory issues={}",
+                        truncate(&issues.join("; "), 500)
+                    );
+                }
+            }
+            if display_text.trim().is_empty() {
+                let fallback = if finish_reason.as_deref() == Some("length") {
+                    "⚠️ Respons terpotong karena batas Max Tokens tercapai di AI Server. Silakan naikkan batas Max Tokens di Pengaturan (⚙)."
+                } else {
+                    "⚠️ AI Server menyelesaikan respons tanpa konten teks. Pastikan model di LM Studio tidak kehabisan context/tokens atau periksa pengaturan reasoning."
+                };
+                let _ = app.emit(
+                    "chat-chunk",
+                    ChunkPayload {
+                        id,
+                        delta: fallback.to_string(),
                     },
                 );
             }
@@ -1403,7 +1542,7 @@ pub async fn chat_stream(
             node: mcp_node.as_deref().unwrap_or("node").to_string(),
         };
         let ctx = SearchContext {
-            provider: search_provider.as_deref().unwrap_or("ddg"),
+            provider: search_provider.as_deref().unwrap_or("bing"),
             mcp_index_path: mcp_index_path.as_deref(),
             mcp_node: mcp_node.as_deref(),
         };
@@ -1767,12 +1906,12 @@ pub async fn chat_stream(
         }
         block.push_str(
             "\n</search_results>\n\nKONTRAK JAWABAN:\n\
-             - Gunakan hanya klaim yang dinyatakan oleh evidence di atas.\n\
-             - Setiap angka, tanggal, status ya/tidak, dan klaim faktual harus memiliki citation ([1], [2]) pada paragraf yang sama.\n\
+             - Untuk pertanyaan rekomendasi umum (seperti kuliner/tempat makan, wisata, produk, atau tips lokal): berikan daftar rekomendasi yang konkret dan solutif (sebutkan nama tempat populer, hidangan khas, atau patokan lokasi). Jangan menolak atau sekadar menyuruh pengguna mencari di aplikasi lain seperti Maps atau Waze.\n\
+             - Gunakan fakta yang didukung oleh evidence di atas dan sertakan citation ([1], [2]) jika merujuk dari web.\n\
              - Citation harus mendukung klaim tersebut, bukan sekadar membahas topik serupa.\n\
              - Ketiadaan item dalam daftar bukan bukti bahwa item tersebut tidak ada. Jangan menyimpulkan “bukan”, “tidak ada”, atau “belum” tanpa evidence eksplisit.\n\
              - Jika sumber berbeda, utamakan official/primary dan jelaskan konflik.\n\
-             - Jika status evidence belum memadai, jangan memberi jawaban ya/tidak yang definitif; nyatakan apa yang belum dapat diverifikasi.",
+             - Jika status evidence belum memadai pada pertanyaan faktual ketat (hukum, kebijakan, tanggal resmi), jangan memberi kesimpulan definitif; nyatakan apa yang belum dapat diverifikasi.",
         );
 
         // Suntikkan hasil ke pesan USER terakhir (bukan sebagai pesan assistant
@@ -1937,6 +2076,25 @@ mod tests {
             "berita terbaru tentang karhutla tahun 2024",
         );
         assert_eq!(historical, "berita karhutla 2024");
+    }
+
+    #[test]
+    fn sanitizes_hallucinated_indonesia_on_technical_queries() {
+        let user_req =
+            "Library STT/TTS lokal apa yang paling ramai direkomendasikan di Reddit/HN sebulan terakhir?";
+        let model_query = "rekomendasi library STT TTS lokal Indonesia Reddit Hacker News";
+        let cleaned = sanitize_technical_query(model_query, user_req);
+        assert_eq!(
+            cleaned,
+            "rekomendasi library STT TTS local offline Reddit Hacker News"
+        );
+
+        let general_req = "rekomendasi kuliner lokal di Indonesia";
+        let general_query = "rekomendasi kuliner lokal Indonesia";
+        assert_eq!(
+            sanitize_technical_query(general_query, general_req),
+            "rekomendasi kuliner lokal Indonesia"
+        );
     }
 
     #[test]

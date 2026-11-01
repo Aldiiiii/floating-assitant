@@ -36,8 +36,18 @@ fn context_for(path: &Path) -> Result<Arc<WhisperContext>, String> {
         ));
     }
 
-    let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default())
-        .map_err(|e| format!("Gagal memuat model Whisper: {e}"))?;
+    let mut params = WhisperContextParameters::default();
+    params.use_gpu(true);
+    let ctx = match WhisperContext::new_with_params(path, params) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[Whisper] Inisialisasi GPU Vulkan gagal ({e}), mencoba fallback ke CPU...");
+            let mut cpu_params = WhisperContextParameters::default();
+            cpu_params.use_gpu(false);
+            WhisperContext::new_with_params(path, cpu_params)
+                .map_err(|e2| format!("Gagal memuat model Whisper (GPU & CPU fallback gagal): {e2}"))?
+        }
+    };
     let arc = Arc::new(ctx);
     *guard = Some((path.to_path_buf(), arc.clone()));
     Ok(arc)
@@ -78,20 +88,27 @@ pub fn transcribe(
         "id" | "en" => language,
         _ => "auto",
     };
-    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 2 });
+    // Optimasi CPU multi-threading: manfaatkan semua core yang tersedia (maksimal 8 thread untuk efisiensi)
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get() as i32)
+        .unwrap_or(4)
+        .clamp(2, 8);
+    params.set_n_threads(threads);
     params.set_language(Some(pinned));
-    // Bias decoding ke kosakata bahasa utama (membantu frasa campuran ID+EN).
+    // Bias decoding ke kosakata bahasa utama dan istilah teknis pemrograman campuran ID+EN.
     match pinned {
         "id" => params.set_initial_prompt(
-            "Berikut adalah transkripsi percakapan bahasa Indonesia sehari-hari.",
+            "Berikut adalah transkripsi percakapan bahasa Indonesia sehari-hari dan istilah teknis pemrograman: coding, software, build, error, bug, code, terminal, file, script, installer, tauri, react, git.",
         ),
         "en" => params.set_initial_prompt(
-            "The following is a transcription of everyday English conversation.",
+            "The following is a transcription of everyday English conversation and programming terms.",
         ),
         _ => {}
     }
     params.set_translate(false);
     params.set_no_context(true);
+    params.set_no_speech_thold(0.5);
     params.set_print_special(false);
     params.set_print_progress(false);
     params.set_print_realtime(false);
@@ -114,7 +131,53 @@ pub fn transcribe(
     let language = detected_language(state.full_lang_id_from_state());
 
     Ok(Transcript {
-        text: text.trim().to_string(),
+        text: filter_hallucination(&text),
         language,
     })
+}
+
+/// Filter halusinasi umum Whisper saat audio hening / suara desah mikrofon.
+pub fn filter_hallucination(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let clean: String = trimmed
+        .chars()
+        .filter(|c| !c.is_ascii_punctuation())
+        .collect::<String>()
+        .to_lowercase();
+    let normalized = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    const SILENCE_HALLUCINATIONS: &[&str] = &[
+        "terima kasih",
+        "terimakasih",
+        "terima kasih banyak",
+        "terima kasih sudah menonton",
+        "terima kasih telah menonton",
+        "terima kasih atas perhatiannya",
+        "sampai jumpa",
+        "thank you",
+        "thank you very much",
+        "thank you for watching",
+        "thanks for watching",
+        "you",
+        "subtitles by",
+        "subtitles by the amara org community",
+        "music",
+        "musik",
+    ];
+
+    if SILENCE_HALLUCINATIONS.contains(&normalized.as_str()) {
+        return String::new();
+    }
+
+    if (trimmed.starts_with('[') && trimmed.ends_with(']'))
+        || (trimmed.starts_with('(') && trimmed.ends_with(')'))
+    {
+        return String::new();
+    }
+
+    trimmed.to_string()
 }

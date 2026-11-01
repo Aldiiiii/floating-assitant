@@ -1,5 +1,14 @@
 # Env khusus toolchain native Windows MSVC.
-# whisper-rs-sys butuh libclang (bindgen) dan cmake (build whisper.cpp).
+# whisper-rs-sys butuh libclang (bindgen), cmake (build whisper.cpp), dan vulkan sdk.
+[build]
+target-dir = "D:/b"
+
+[env]
+VULKAN_SDK = 'C:\VulkanSDK\1.4.363.0'
+LIBCLANG_PATH = 'C:\Program Files\LLVM\bin'
+CMAKE = 'C:\Program Files\CMake\bin\cmake.exe'
+
 [target.x86_64-pc-windows-msvc.env]
 LIBCLANG_PATH = 'C:\Program Files\LLVM\bin'
 CMAKE = 'C:\Program Files\CMake\bin\cmake.exe'
+VULKAN_SDK = 'C:\VulkanSDK\1.4.363.0'

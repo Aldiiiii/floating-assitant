@@ -27,7 +27,14 @@ body {
 }
 
 input,
-textarea {
+textarea,
+article,
+.message-content,
+.prose,
+.prose *,
+pre,
+code,
+.selectable-text {
   -webkit-user-select: text;
   user-select: text;
 }
@@ -66,4 +73,20 @@ select {
 select option {
   background-color: #242421;
   color: #e4e3dc;
+}
+
+@keyframes wave-dot {
+  0%, 100% {
+    transform: scale(0.6);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 1;
+  }
+}
+
+.animate-wave-dot {
+  display: inline-block;
+  animation: wave-dot 1.2s ease-in-out infinite;
 }

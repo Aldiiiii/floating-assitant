@@ -166,7 +166,16 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            app.global_shortcut().register("Alt+Space")?;
+            if let Err(e) = app.global_shortcut().register("Alt+Space") {
+                eprintln!("[warn] Shortcut global \"Alt+Space\" gagal didaftarkan ({e}). Mencoba fallback \"Alt+Shift+Space\"...");
+                if let Err(e2) = app.global_shortcut().register("Alt+Shift+Space") {
+                    eprintln!("[warn] Shortcut fallback \"Alt+Shift+Space\" juga gagal ({e2}). Aplikasi tetap berjalan via System Tray & Bubble.");
+                } else {
+                    println!("[info] Shortcut global alternatif aktif: Alt+Shift+Space");
+                }
+            } else {
+                println!("[info] Shortcut global aktif: Alt+Space");
+            }
 
             Ok(())
         })
