@@ -8,8 +8,8 @@ import {
   type ChatMessageDto,
 } from "../lib/api";
 import { db, type ConversationRow, type SourceRef } from "../lib/db";
-import { DEFAULT_SYSTEM_PROMPT, useSettingsStore } from "./settings";
-import { setSpeechStreamActive, useVoiceStore } from "./voice";
+import { DEFAULT_SYSTEM_PROMPT, getDialogPromptExtension, useSettingsStore } from "./settings";
+import { registerBargeInInterruptHandler, setSpeechStreamActive, useVoiceStore } from "./voice";
 
 export type Role = "user" | "assistant";
 
@@ -54,6 +54,7 @@ interface ChatState {
   captureError: string | null;
   searchPhase: string | null;
   editDraft: string | null;
+  interruptedSnippet: string | null;
 
   init: () => Promise<void>;
   setSidebar: (open: boolean) => void;
@@ -64,6 +65,7 @@ interface ChatState {
   regenerate: () => Promise<void>;
   editLastUser: (msg: ChatMsg) => void;
   setEditDraft: (v: string | null) => void;
+  markInterrupted: () => void;
   attach: (mode: CaptureMode) => Promise<void>;
   removeAttachment: () => void;
   send: (text: string) => Promise<void>;
@@ -81,9 +83,13 @@ export function extractSpeakableText(raw: string, isFinal = false): string {
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/<thought>[\s\S]*?<\/thought>/gi, "")
     .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+    .replace(/<function=[^>]*>[\s\S]*?<\/function>/gi, "")
     .replace(/<think>[\s\S]*/gi, "")
     .replace(/<thought>[\s\S]*/gi, "")
-    .replace(/<reasoning>[\s\S]*/gi, "");
+    .replace(/<reasoning>[\s\S]*/gi, "")
+    .replace(/<tool_call[\s\S]*/gi, "")
+    .replace(/<function=[\s\S]*/gi, "");
 
   // Hanya jika streaming sudah selesai total (isFinal) DAN tidak ada teks sama sekali di luar tag:
   if (isFinal && !cleaned.trim()) {
@@ -257,9 +263,60 @@ export function extractFirstSentences(text: string, maxSentences = 2): string {
   return trimmed;
 }
 
+/**
+ * Estimasi token presisi berbasis segmentasi subword BPE lintas bahasa (Indonesia, Inggris, Kode, Angka).
+ * Mencegah context window overflow pada model lokal dengan akurasi jauh lebih tinggi dibanding length / 4.
+ */
 export function estimateTokens(text: string): number {
-  // Heuristik lintas bahasa: ~4 karakter per token.
-  return Math.ceil(text.length / 4);
+  if (!text) return 0;
+  const tokenPattern = /\p{L}+|\p{N}+|[^\s\p{L}\p{N}]+|\s+/gu;
+  let totalTokens = 0;
+  const matches = text.match(tokenPattern);
+  if (!matches) return Math.ceil(text.length / 3);
+
+  for (const chunk of matches) {
+    const len = chunk.length;
+    const firstChar = chunk.charCodeAt(0);
+
+    // Spasi / whitespace
+    if (firstChar <= 32) {
+      totalTokens += Math.ceil(len / 4);
+      continue;
+    }
+
+    // Angka (digits)
+    if (firstChar >= 48 && firstChar <= 57) {
+      totalTokens += Math.ceil(len / 2.5);
+      continue;
+    }
+
+    // Karakter CJK / non-Latin
+    if (firstChar > 0x024f) {
+      totalTokens += Math.max(1, Math.ceil(len * 1.1));
+      continue;
+    }
+
+    // Simbol / tanda baca / operator kode
+    if (
+      (firstChar >= 33 && firstChar <= 47) ||
+      (firstChar >= 58 && firstChar <= 64) ||
+      (firstChar >= 91 && firstChar <= 96) ||
+      (firstChar >= 123 && firstChar <= 126)
+    ) {
+      totalTokens += Math.ceil(len / 1.5);
+      continue;
+    }
+
+    // Kata Latin (Bahasa Indonesia / Inggris)
+    if (len <= 3) {
+      totalTokens += 1;
+    } else {
+      // Bobot konservatif 2.8 char/token untuk menangani aglutinatif Indonesia & istilah teknis
+      totalTokens += Math.ceil(len / 2.8);
+    }
+  }
+
+  return totalTokens;
 }
 let listenersStarted = false;
 
@@ -312,6 +369,15 @@ function shouldAutoSpeak(): boolean {
 async function ensureListeners() {
   if (listenersStarted) return;
   listenersStarted = true;
+
+  registerBargeInInterruptHandler(() => {
+    useChatStore.getState().stop();
+    useChatStore.getState().markInterrupted();
+    const vs = useVoiceStore.getState();
+    if (vs.mode === "dialog" && vs.dialogActive && vs.state === "idle") {
+      void vs.startRecording().catch(() => undefined);
+    }
+  });
 
   void listen<ChunkEvent>("chat-chunk", (e) => {
     if (e.payload.id !== activeRequest) return;
@@ -424,6 +490,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   captureError: null,
   searchPhase: null,
   editDraft: null,
+  interruptedSnippet: null,
 
   init: async () => {
     await ensureListeners();
@@ -485,22 +552,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   send: async (text) => {
     const t = text.trim();
-    const s = get();
-    if (t === "" || s.streaming) return;
+    if (t === "" || get().streaming) return;
+    set({ streaming: true });
 
     // Screenshot tidak pernah disimpan ke disk — hanya di memori.
-    const att = s.attachment;
+    const att = get().attachment;
     set({ attachment: null });
 
-    let convId = s.currentId;
+    let convId = get().currentId;
     if (convId == null) {
-      const conv = await db.createConversation(deriveTitle(t));
-      convId = conv.id;
-      set({ currentId: convId });
+      try {
+        const conv = await db.createConversation(deriveTitle(t));
+        convId = conv.id;
+        set({ currentId: convId });
+      } catch (err) {
+        set({ streaming: false });
+        throw err;
+      }
     }
 
     const persistedText = att ? `${t}\n\n[📷 Screenshot ${att.width}x${att.height}]` : t;
-    const msgId = await db.addMessage(convId, "user", persistedText);
+    let msgId: number;
+    try {
+      msgId = await db.addMessage(convId, "user", persistedText);
+    } catch (err) {
+      set({ streaming: false });
+      throw err;
+    }
 
     set((st) => ({
       messages: [
@@ -567,6 +645,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setEditDraft: (v) => set({ editDraft: v }),
 
+  markInterrupted: () => {
+    const s = get();
+    const lastMsg = s.messages[s.messages.length - 1];
+    if (lastMsg && lastMsg.role === "assistant" && lastMsg.content.trim()) {
+      const clean = extractSpeakableText(lastMsg.content, true);
+      const snippet = clean.slice(-140).trim() || lastMsg.content.slice(-140).trim();
+      set({ interruptedSnippet: snippet });
+      // Berikan tanda visual halus bahwa pesan ini terpotong oleh pengguna
+      set((st) => {
+        const msgs = [...st.messages];
+        const last = msgs[msgs.length - 1];
+        if (last && last.role === "assistant" && !last.content.endsWith("…")) {
+          msgs[msgs.length - 1] = {
+            ...last,
+            content: `${last.content.trimEnd()} … [ucapan terpotong oleh pengguna]`,
+          };
+        }
+        return { messages: msgs };
+      });
+    }
+  },
+
   stop: () => {
     speechStreamManager.stop();
     useVoiceStore.getState().stopSpeaking();
@@ -603,10 +703,24 @@ async function runAssistant(imageParts?: unknown) {
   }));
   // Windowing token-based: sisakan 30% context utk respons,
   // system prompt & pesan terbaru selalu diprioritaskan.
+  const vs = useVoiceStore.getState();
+  const isDialogVoice = vs.mode === "dialog" && vs.dialogActive;
+  let activeSystemPrompt = settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  if (isDialogVoice) {
+    activeSystemPrompt = `${activeSystemPrompt}\n\n${getDialogPromptExtension(vs.dialogBrevity)}`;
+  }
+  if (chat.interruptedSnippet) {
+    activeSystemPrompt = `${activeSystemPrompt}\n\n[Konteks Interupsi]: Pengguna baru saja memotong (barge-in) ucapan asisten sebelumnya saat asisten baru membahas: "${chat.interruptedSnippet}". Dengarkan instruksi baru pengguna dengan tanggap tanpa mengulang kalimat yang sudah dipotong.`;
+    useChatStore.setState({ interruptedSnippet: null });
+  }
+  const effectiveMaxTokens = isDialogVoice
+    ? (vs.dialogMaxTokens ?? 2048)
+    : settings.maxTokens;
+
   const contextTokens = settings.contextTokens ?? 4096;
   const budgetTokens = Math.floor(contextTokens * 0.7);
   let used =
-    estimateTokens(settings.systemPrompt || DEFAULT_SYSTEM_PROMPT) +
+    estimateTokens(activeSystemPrompt) +
     estimateTokens(all[all.length - 1]?.content ? JSON.stringify(all[all.length - 1].content) : "");
   let cut = 0;
   for (let i = all.length - 2; i >= 0; i--) {
@@ -639,10 +753,10 @@ async function runAssistant(imageParts?: unknown) {
       model: settings.model,
       messages: history,
       hasImage,
-      systemPrompt: settings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+      systemPrompt: activeSystemPrompt,
       temperature: settings.temperature,
       topP: settings.topP,
-      maxTokens: settings.maxTokens,
+      maxTokens: effectiveMaxTokens,
       webSearchEnabled: settings.webSearchEnabled,
       searchProvider: settings.searchProvider,
       mcpIndexPath: settings.mcpIndexPath || null,

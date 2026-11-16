@@ -23,12 +23,15 @@ function getStore(): Promise<Store> {
   return storePromise;
 }
 
-export function getMochiOffset(dock: DockSide) {
-  // Posisi Mochi di dalam window chat (466x554) dengan padding p-1.5 (6px).
-  // Sisi horizontal: jika Mochi di kanan, offset = 466 - 64 - 6 = 396; jika di kiri = 6.
-  // Sisi vertikal: jika Mochi di bawah, offset = 554 - 64 - 6 = 484; jika di atas = 6.
-  const x = dock.side === "right" ? SIZES.chat.width - SIZES.bubble.width - 6 : 6;
-  const y = dock.vertical === "bottom" ? SIZES.chat.height - SIZES.bubble.height - 6 : 6;
+export function getMochiOffset(
+  dock: DockSide,
+  chatSize: { width: number; height: number } = SIZES.chat
+) {
+  // Posisi Mochi di dalam window chat dengan padding p-1.5 (6px).
+  // Sisi horizontal: jika Mochi di kanan, offset = chatWidth - 64 - 6; jika di kiri = 6.
+  // Sisi vertikal: jika Mochi di bawah, offset = chatHeight - 64 - 6; jika di atas = 6.
+  const x = dock.side === "right" ? chatSize.width - SIZES.bubble.width - 6 : 6;
+  const y = dock.vertical === "bottom" ? chatSize.height - SIZES.bubble.height - 6 : 6;
   return { x, y };
 }
 
@@ -66,11 +69,16 @@ async function applyShape(mode: Mode) {
   await setWindowShape(radius).catch(() => undefined);
 }
 
-async function applyLayout(mode: Mode, position?: { x: number; y: number }) {
+async function applyLayout(
+  mode: Mode,
+  position?: { x: number; y: number },
+  targetSize?: { width: number; height: number }
+) {
   const win = getCurrentWindow();
   const scale = await win.scaleFactor();
-  const widthPx = Math.round(SIZES[mode].width * scale);
-  const heightPx = Math.round(SIZES[mode].height * scale);
+  const size = targetSize ?? SIZES[mode];
+  const widthPx = Math.round(size.width * scale);
+  const heightPx = Math.round(size.height * scale);
   const current = await win.outerPosition();
   const next = await fitInsideMonitor(
     position?.x ?? current.x,
@@ -78,10 +86,10 @@ async function applyLayout(mode: Mode, position?: { x: number; y: number }) {
     widthPx,
     heightPx,
   );
-  await win.setSize(new LogicalSize(SIZES[mode].width, SIZES[mode].height));
+  await win.setSize(new LogicalSize(size.width, size.height));
   await win.setPosition(new PhysicalPosition(next.x, next.y));
   requestAnimationFrame(() => {
-    void win.setSize(new LogicalSize(SIZES[mode].width, SIZES[mode].height));
+    void win.setSize(new LogicalSize(size.width, size.height));
     window.dispatchEvent(new Event("resize"));
   });
 }
@@ -94,7 +102,10 @@ export async function restoreStartup(): Promise<{ mode: Mode; dock: DockSide }> 
   const storedDock = await store.get<DockSide>("window.dock");
   const dock = storedDock ?? (await detectDock());
   const startMinimized = (await store.get<boolean>("app.startMinimized")) ?? false;
-  await applyLayout(mode, savedPos ?? undefined);
+  const savedChatSize = (await store.get<{ width: number; height: number }>("window.chatSize")) ?? SIZES.chat;
+  const targetSize = mode === "chat" ? savedChatSize : SIZES.bubble;
+
+  await applyLayout(mode, savedPos ?? undefined, targetSize);
   await applyShape(mode);
   if (!startMinimized) {
     await win.show();
@@ -123,24 +134,30 @@ export async function changeMode(
     }
   }
 
-  const offset = getMochiOffset(dock);
+  const savedChatSize = (await store.get<{ width: number; height: number }>("window.chatSize")) ?? SIZES.chat;
+  const targetSize = mode === "chat" ? savedChatSize : SIZES.bubble;
   let nextPos: { x: number; y: number } | undefined;
 
   if (mode === "chat" && prevMode === "bubble") {
     // Geser window chat agar posisi Mochi di dalamnya tepat berada di koordinat bubble sebelumnya
+    const offset = getMochiOffset(dock, targetSize);
     nextPos = {
       x: current.x - Math.round(offset.x * scale),
       y: current.y - Math.round(offset.y * scale),
     };
   } else if (mode === "bubble" && prevMode === "chat") {
-    // Kembalikan window bubble tepat di koordinat Mochi berada saat ini
+    // Kembalikan window bubble tepat di koordinat Mochi berada saat ini (gunakan ukuran window chat saat ini)
+    const curOuterSize = await win.outerSize();
+    const curWidth = Math.round(curOuterSize.width / scale);
+    const curHeight = Math.round(curOuterSize.height / scale);
+    const offset = getMochiOffset(dock, { width: curWidth, height: curHeight });
     nextPos = {
       x: current.x + Math.round(offset.x * scale),
       y: current.y + Math.round(offset.y * scale),
     };
   }
 
-  await applyLayout(mode, nextPos);
+  await applyLayout(mode, nextPos, targetSize);
   await applyShape(mode);
   if (opts?.focus) await win.setFocus();
   await store.set("window.mode", mode);
@@ -150,14 +167,42 @@ export async function changeMode(
 
 export async function watchPosition(): Promise<UnlistenFn> {
   const win = getCurrentWindow();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return win.onMoved((event) => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
+  let moveTimer: ReturnType<typeof setTimeout> | undefined;
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const unlistenMoved = await win.onMoved((event) => {
+    if (moveTimer) clearTimeout(moveTimer);
+    moveTimer = setTimeout(() => {
       void (async () => {
         const store = await getStore();
         await store.set("window.pos", { x: event.payload.x, y: event.payload.y });
       })();
     }, 400);
   });
+
+  const unlistenResized = await win.onResized((event) => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      void (async () => {
+        const store = await getStore();
+        const mode = (await store.get<Mode>("window.mode")) ?? "bubble";
+        if (mode === "chat") {
+          const scale = await win.scaleFactor();
+          const logicalWidth = Math.round(event.payload.width / scale);
+          const logicalHeight = Math.round(event.payload.height / scale);
+          if (logicalWidth >= 380 && logicalHeight >= 400) {
+            await store.set("window.chatSize", {
+              width: logicalWidth,
+              height: logicalHeight,
+            });
+          }
+        }
+      })();
+    }, 400);
+  });
+
+  return () => {
+    unlistenMoved();
+    unlistenResized();
+  };
 }

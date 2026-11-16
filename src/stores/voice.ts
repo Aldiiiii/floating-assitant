@@ -8,26 +8,69 @@ import {
   ttsPause,
   ttsSpeak,
   ttsStop,
+  voiceMonitorStart,
+  voiceMonitorStop,
   voiceStart,
   voiceStop,
 } from "../lib/api";
 import { load, type Store } from "@tauri-apps/plugin-store";
-import { playBargeInCue, playDoneCue, playListeningCue } from "../lib/earcons";
+import { playBargeInCue, playDoneCue, playListeningCue, playStandbyCue } from "../lib/earcons";
 
 export type VoiceMode = "ptt" | "toggle" | "dialog";
 export type SttModel = "whisper-base" | "whisper-small" | "whisper-medium";
 export type SttLanguage = "id" | "en" | "auto";
 export type TtsVoice = "id" | "id-gadis" | "id-ardi" | "en";
 export type MicSensitivity = "high" | "normal" | "low";
+export type DialogCadence = "fast" | "normal" | "relaxed";
+export type DialogBrevity = "concise" | "balanced" | "detailed";
 
 let vadSilenceHandler: (() => void) | null = null;
+let bargeInInterruptHandler: (() => void) | null = null;
 
 export function registerVadSilenceHandler(handler: (() => void) | null) {
   vadSilenceHandler = handler;
 }
 
+export function registerBargeInInterruptHandler(handler: (() => void) | null) {
+  bargeInInterruptHandler = handler;
+}
+
 let speechStreamActive = false;
 let dialogResumeTimer: ReturnType<typeof setTimeout> | null = null;
+let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+let userSpokeInTurn = false;
+
+function clearInactivityTimer() {
+  if (inactivityTimer) {
+    clearTimeout(inactivityTimer);
+    inactivityTimer = null;
+  }
+}
+
+function startInactivityTimer() {
+  clearInactivityTimer();
+  inactivityTimer = setTimeout(() => {
+    const cur = useVoiceStore.getState();
+    if (cur.mode === "dialog" && cur.dialogActive && cur.state === "recording") {
+      if (userSpokeInTurn) {
+        // Pengguna sudah sempat bicara: selesaikan rekaman & transkrip agar asisten merespons
+        if (vadSilenceHandler) {
+          vadSilenceHandler();
+        } else {
+          void cur.stopRecording();
+        }
+        return;
+      }
+      // Tidak ada suara sama sekali selama 12 detik: masukkan dialog mode ke status standby
+      void cur.cancelRecording();
+      playStandbyCue();
+      useVoiceStore.setState({
+        dialogStandby: true,
+        dialogActive: false,
+      });
+    }
+  }, 12000);
+}
 
 function triggerDialogTurn() {
   if (dialogResumeTimer) clearTimeout(dialogResumeTimer);
@@ -65,10 +108,14 @@ interface VoiceStateStore {
   vadAutoStop: boolean;
   bargeIn: boolean;
   dialogActive: boolean;
+  dialogStandby: boolean;
   ttsVoice: TtsVoice;
   language: SttLanguage;
   speechSpeed: number;
   micSensitivity: MicSensitivity;
+  dialogCadence: DialogCadence;
+  dialogBrevity: DialogBrevity;
+  dialogMaxTokens: number;
 
   state: "idle" | "recording" | "transcribing" | "error";
   streamingText: string | null;
@@ -95,12 +142,16 @@ interface VoiceStateStore {
   setVadAutoStop: (v: boolean) => void;
   setBargeIn: (v: boolean) => void;
   setDialogActive: (v: boolean) => void;
+  setDialogStandby: (v: boolean) => void;
   setSttModel: (m: SttModel) => void;
   setAutoSpeak: (v: boolean) => void;
   setTtsVoice: (v: TtsVoice) => void;
   setLanguage: (l: SttLanguage) => void;
   setSpeechSpeed: (v: number) => void;
   setMicSensitivity: (s: MicSensitivity) => void;
+  setDialogCadence: (c: DialogCadence) => void;
+  setDialogBrevity: (b: DialogBrevity) => void;
+  setDialogMaxTokens: (t: number) => void;
 
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<{ text: string; language: string } | null>;
@@ -121,6 +172,7 @@ function getStore(): Promise<Store> {
 let listenersStarted = false;
 let transcribingWatchdog: ReturnType<typeof setTimeout> | null = null;
 let bargeInCounter = 0;
+let speakingStartedAt = 0;
 
 async function ensureListeners() {
   if (listenersStarted) return;
@@ -177,16 +229,26 @@ async function ensureListeners() {
 
   void listen<{ state: string; error?: string }>("tts-state", (e) => {
     if (e.payload.state === "playing" || e.payload.state === "loading") {
+      speakingStartedAt = Date.now();
+      bargeInCounter = 0;
       useVoiceStore.setState({
         speaking: true,
         paused: e.payload.state === "playing" ? false : useVoiceStore.getState().paused,
         playbackError: e.payload.error ?? null,
       });
+      // Barge-in active listening: nyalakan voice monitor saat asisten berbicara
+      const s = useVoiceStore.getState();
+      if (s.bargeIn && s.micEnabled && (s.mode === "dialog" || s.mode === "toggle") && s.state === "idle") {
+        void voiceMonitorStart(s.micDevice, s.micSensitivity).catch(() => undefined);
+      }
     } else if (e.payload.state === "paused") {
+      void voiceMonitorStop().catch(() => undefined);
       useVoiceStore.setState({ speaking: true, paused: true });
     } else if (e.payload.state === "error") {
+      void voiceMonitorStop().catch(() => undefined);
       useVoiceStore.setState({ speaking: false, paused: false, playbackError: e.payload.error ?? "TTS gagal." });
     } else {
+      void voiceMonitorStop().catch(() => undefined);
       if (speechStreamActive) {
         // Aliran kalimat TTS masih aktif (masih ada kalimat dalam antrean sintesis),
         // jangan matikan status speaking dan jangan aktifkan mikrofon dulu.
@@ -214,6 +276,8 @@ async function ensureListeners() {
   );
 
   void listen<{ text: string; is_final: boolean }>("voice-stream-chunk", (e) => {
+    userSpokeInTurn = true;
+    clearInactivityTimer();
     if (!e.payload.is_final) {
       const raw = e.payload.text?.trim() ?? "";
       const normalized = raw
@@ -243,21 +307,35 @@ async function ensureListeners() {
     const level = typeof e.payload === "number" ? e.payload : 0;
     useVoiceStore.setState({ audioLevel: level });
 
-    // Interupsi suara (Barge-in): jika asisten sedang bersuara dan pengguna mulai bicara cukup keras
     const s = useVoiceStore.getState();
+    // Jika pengguna sedang bersuara saat giliran merekam, batalkan timer hening
+    if (s.mode === "dialog" && s.dialogActive && s.state === "recording" && level > 0.04) {
+      userSpokeInTurn = true;
+      clearInactivityTimer();
+    }
+
+    // Interupsi suara (Barge-in): jika asisten sedang bersuara dan pengguna mulai bicara cukup keras
     if (s.bargeIn && s.speaking && (s.mode === "dialog" || s.mode === "toggle")) {
-      if (level >= 0.28) {
+      // Grace period 750ms: abaikan acoustic transient saat speaker mulai bersuara
+      const now = Date.now();
+      if (now - speakingStartedAt < 750) {
+        bargeInCounter = 0;
+        return;
+      }
+
+      // Threshold adaptif: gema speaker laptop berada di rentang 0.10 - 0.22.
+      // Suara vokal manusia langsung ke mic menghasilkan level 0.35 - 0.70+.
+      const threshold = s.micSensitivity === "high" ? 0.28 : s.micSensitivity === "low" ? 0.44 : 0.35;
+      if (level >= threshold) {
         bargeInCounter++;
         if (bargeInCounter >= 3) {
           bargeInCounter = 0;
           playBargeInCue();
+          void voiceMonitorStop().catch(() => undefined);
           s.stopSpeaking();
-          import("./chat").then(({ useChatStore }) => {
-            useChatStore.getState().stop();
-            if (s.mode === "dialog" && s.dialogActive && s.state === "idle") {
-              void s.startRecording().catch(() => undefined);
-            }
-          });
+          if (bargeInInterruptHandler) {
+            bargeInInterruptHandler();
+          }
         }
       } else {
         bargeInCounter = 0;
@@ -279,10 +357,14 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
   vadAutoStop: true,
   bargeIn: true,
   dialogActive: false,
+  dialogStandby: false,
   ttsVoice: "id-gadis",
   language: "id",
   speechSpeed: 1,
   micSensitivity: "normal",
+  dialogCadence: "normal",
+  dialogBrevity: "concise",
+  dialogMaxTokens: 2048,
 
   state: "idle",
   streamingText: null,
@@ -354,6 +436,12 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
     const speechSpeed = (await store.get<number>("voice.speechSpeed")) ?? 1;
     const micSensitivity =
       (await store.get<MicSensitivity>("voice.micSensitivity")) ?? "normal";
+    const dialogCadence =
+      (await store.get<DialogCadence>("voice.dialogCadence")) ?? "normal";
+    const dialogBrevity =
+      (await store.get<DialogBrevity>("voice.dialogBrevity")) ?? "concise";
+    const dialogMaxTokens =
+      (await store.get<number>("voice.dialogMaxTokens")) ?? 2048;
     set({
       micEnabled,
       mode,
@@ -368,6 +456,9 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
       language,
       speechSpeed,
       micSensitivity,
+      dialogCadence,
+      dialogBrevity,
+      dialogMaxTokens,
     });
     void get().loadDevices();
     void get().loadOutputDevices();
@@ -390,12 +481,16 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
     void persist("voice.bargeIn", v);
   },
   setDialogActive: (v) => {
-    if (!v && dialogResumeTimer) {
-      clearTimeout(dialogResumeTimer);
-      dialogResumeTimer = null;
+    if (!v) {
+      if (dialogResumeTimer) {
+        clearTimeout(dialogResumeTimer);
+        dialogResumeTimer = null;
+      }
+      clearInactivityTimer();
     }
-    set({ dialogActive: v });
+    set({ dialogActive: v, dialogStandby: false });
   },
+  setDialogStandby: (v) => set({ dialogStandby: v }),
   setSttModel: (m) => {
     set({ sttModel: m });
     void persist("voice.sttModel", m);
@@ -420,23 +515,49 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
     set({ micSensitivity: s });
     void persist("voice.micSensitivity", s);
   },
+  setDialogCadence: (c) => {
+    set({ dialogCadence: c });
+    void persist("voice.dialogCadence", c);
+  },
+  setDialogBrevity: (b) => {
+    set({ dialogBrevity: b });
+    void persist("voice.dialogBrevity", b);
+  },
+  setDialogMaxTokens: (t) => {
+    set({ dialogMaxTokens: t });
+    void persist("voice.dialogMaxTokens", t);
+  },
 
   startRecording: async () => {
     const s = get();
     if (!s.micEnabled || s.state !== "idle") return;
     try {
-      set({ streamingText: null, error: null });
+      set({ streamingText: null, error: null, dialogStandby: false });
+      userSpokeInTurn = false;
       const useAutoStop = s.mode === "dialog" || s.vadAutoStop;
+      const silenceLimit =
+        s.mode === "dialog"
+          ? s.dialogCadence === "fast"
+            ? 1200
+            : s.dialogCadence === "relaxed"
+            ? 2200
+            : 1600
+          : s.vadAutoStop
+          ? 1800
+          : 2500;
       await voiceStart(
         s.micDevice,
         s.sttModel,
         s.language,
         true,
         useAutoStop,
-        1200,
+        silenceLimit,
         s.micSensitivity,
       );
       playListeningCue();
+      if (s.mode === "dialog" && s.dialogActive) {
+        startInactivityTimer();
+      }
     } catch (e) {
       // voice-state error event juga ter-emit dari Rust; mirror di sini.
       set({ streamingText: null, state: "error", error: String(e) });
@@ -450,6 +571,7 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
   },
 
   stopRecording: async () => {
+    clearInactivityTimer();
     const s = get();
     if (s.state !== "recording") return null;
     try {
@@ -469,6 +591,7 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
   },
 
   cancelRecording: async () => {
+    clearInactivityTimer();
     const s = get();
     if (s.state !== "recording") return;
     try {
@@ -499,6 +622,7 @@ export const useVoiceStore = create<VoiceStateStore>((set, get) => ({
   },
 
   stopSpeaking: () => {
+    void voiceMonitorStop().catch(() => undefined);
     setSpeechStreamActive(false);
     ttsStop().catch(() => undefined);
   },

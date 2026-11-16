@@ -11,7 +11,7 @@ const SECTIONS: { title: string; icon: IconName; items: string[] }[] = [
     items: [
       "Klik bubble untuk membuka panel percakapan.",
       "Geser atau tahan bubble sebentar untuk memindahkan posisinya di layar.",
-      "Alt + Space menampilkan atau menyembunyikan assistant dari aplikasi mana pun.",
+      "Alt + Space atau Alt + C membuka dan menutup chat dari aplikasi mana pun.",
     ],
   },
   {
@@ -19,7 +19,8 @@ const SECTIONS: { title: string; icon: IconName; items: string[] }[] = [
     icon: "history",
     items: [
       "Enter mengirim pesan; Shift + Enter membuat baris baru.",
-      "Tekan Esc dari panel untuk kembali menjadi bubble. Tekan Esc lagi untuk menyembunyikannya.",
+      "Alt + C atau Ctrl + / membuka dan menutup panel chat secara instan.",
+      "Tekan Esc dari panel untuk melipat chat menjadi bubble. Tekan Esc di bubble untuk menyembunyikan ke tray.",
       "Riwayat percakapan tersimpan secara lokal dan dapat dikelola dari menu riwayat.",
     ],
   },
@@ -38,7 +39,7 @@ const SECTIONS: { title: string; icon: IconName; items: string[] }[] = [
     items: [
       "Mode Suara: Tahan bicara (PTT), Klik rekam (Toggle), atau Mode Dialog hands-free.",
       "Audio Cues (Earcons): Nada halus memberi tahu saat mic mulai mendengar dan saat selesai bicara.",
-      "Deteksi hening otomatis (VAD): Asisten berhenti merekam otomatis saat Anda diam >1.2 detik.",
+      "Deteksi hening otomatis (VAD): Asisten berhenti merekam otomatis saat Anda diam >2.5 detik.",
       "Interupsi suara (Barge-in): Suara jawaban asisten otomatis berhenti seketika saat Anda mulai berbicara.",
       "Pembersih Teks TTS: Kode layar dan URL panjang dirangkum secara lisan agar nyaman didengar.",
       "Peredam Bising Dinamis: High-Pass Filter 130Hz meredam deru kipas laptop dan hembusan angin.",

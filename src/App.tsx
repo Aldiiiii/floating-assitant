@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Bubble } from "./components/Bubble";
 import { SpeechBalloonView } from "./components/SpeechBalloonView";
@@ -12,6 +12,7 @@ import {
 import { useChatStore } from "./stores/chat";
 import { useSettingsStore } from "./stores/settings";
 import { useVoiceStore } from "./stores/voice";
+import { playBargeInCue } from "./lib/earcons";
 
 function App() {
   const [mode, setMode] = useState<Mode>("bubble");
@@ -48,6 +49,9 @@ function App() {
     };
   }, []);
 
+  const modeRef = useRef<Mode>(mode);
+  modeRef.current = mode;
+
   const expand = useCallback(async () => {
     const nextDock = await changeMode("chat", { focus: true });
     setDock(nextDock);
@@ -59,19 +63,64 @@ function App() {
     setMode("bubble");
   }, [dock]);
 
+  const toggle = useCallback(() => {
+    if (modeRef.current === "chat") {
+      void collapse();
+    } else {
+      void expand();
+    }
+  }, [collapse, expand]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow().listen("toggle-chat", () => {
+      toggle();
+    }).then((u) => {
+      unlisten = u;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [toggle]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      if (mode === "chat") {
-        void collapse();
-      } else {
-        void getCurrentWindow().hide();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        const vs = useVoiceStore.getState();
+        if (vs.speaking) {
+          playBargeInCue();
+          vs.stopSpeaking();
+          useChatStore.getState().stop();
+          useChatStore.getState().markInterrupted();
+          if (vs.mode === "dialog" && vs.dialogActive && vs.state === "idle") {
+            void vs.startRecording().catch(() => undefined);
+          }
+          return;
+        }
+        if (modeRef.current === "chat") {
+          void collapse();
+        } else {
+          void getCurrentWindow().hide();
+        }
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.key === "/") {
+        event.preventDefault();
+        toggle();
+        return;
+      }
+
+      if (event.altKey && (event.key === "c" || event.key === "C")) {
+        event.preventDefault();
+        toggle();
+        return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [collapse, mode]);
+  }, [collapse, toggle]);
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-transparent">

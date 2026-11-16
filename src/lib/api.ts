@@ -47,15 +47,16 @@ export function setWindowShape(radius: number): Promise<void> {
   return invoke("set_window_shape", { radius });
 }
 
-export function searchKeysGet(): Promise<{ brave: string | null; tavily: string | null }> {
+export function searchKeysGet(): Promise<{ brave: string | null; tavily: string | null; searxng: string | null }> {
   return invoke("search_keys_get");
 }
 
 export function searchKeysSet(
   brave: string | null,
   tavily: string | null,
+  searxng?: string | null,
 ): Promise<void> {
-  return invoke("search_keys_set", { brave, tavily });
+  return invoke("search_keys_set", { brave, tavily, searxng: searxng ?? null });
 }
 
 export function mcpLocalCheck(
@@ -139,6 +140,20 @@ export function voiceStop(
   language: string,
 ): Promise<TranscriptPayload> {
   return invoke("voice_stop", { modelKey, language });
+}
+
+export function voiceMonitorStart(
+  deviceName?: string | null,
+  sensitivity?: string | null,
+): Promise<void> {
+  return invoke("voice_monitor_start", {
+    deviceName: deviceName ?? null,
+    sensitivity: sensitivity ?? null,
+  });
+}
+
+export function voiceMonitorStop(): Promise<void> {
+  return invoke("voice_monitor_stop");
 }
 
 export function ttsSpeak(

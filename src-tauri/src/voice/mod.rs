@@ -23,6 +23,7 @@ use tauri::{AppHandle, Emitter, State};
 #[derive(Default)]
 pub struct VoiceState {
     recorder: Mutex<Option<capture::Recorder>>,
+    monitor: Mutex<Option<capture::Monitor>>,
     stream_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
@@ -102,6 +103,10 @@ pub async fn voice_start(
     if guard.is_some() {
         return Ok(()); // sudah merekam
     }
+    // Pastikan monitor aktif dimatikan sebelum perekaman dimulai
+    if let Ok(mut mon_guard) = state.monitor.lock() {
+        *mon_guard = None;
+    }
     match capture::Recorder::start(app.clone(), device_name.as_deref(), sensitivity.as_deref()) {
         Ok(rec) => {
             let use_stream = stream.unwrap_or(true);
@@ -116,12 +121,12 @@ pub async fn voice_start(
                 let chosen_model = model_key.unwrap_or_else(|| "whisper-base".to_string());
                 let chosen_lang = language.unwrap_or_else(|| "auto".to_string());
                 let auto_stop_active = auto_stop.unwrap_or(false);
-                let silence_limit = silence_ms.unwrap_or(1200);
+                let silence_limit = silence_ms.unwrap_or(1600);
 
                 let (vad_thold, min_speech_rms) = match sensitivity.as_deref() {
-                    Some("low") => (0.52, 0.032),  // Ruangan Bising / Deru Kipas
-                    Some("high") => (0.65, 0.012), // Ruangan Sunyi / Sangat Peka
-                    _ => (0.58, 0.020),            // Normal / Seimbang
+                    Some("low") => (1.8, 0.024),   // Ruangan Bising / Deru Kipas
+                    Some("high") => (1.3, 0.010),  // Ruangan Sunyi / Sangat Peka
+                    _ => (1.5, 0.015),             // Normal / Seimbang
                 };
 
                 tokio::spawn(async move {
@@ -370,6 +375,41 @@ pub fn audio_output_devices() -> Result<Vec<String>, String> {
     Ok(names)
 }
 
+#[tauri::command]
+pub fn voice_monitor_start(
+    app: AppHandle,
+    state: State<'_, VoiceState>,
+    device_name: Option<String>,
+    sensitivity: Option<String>,
+) -> Result<(), String> {
+    let mut guard = state.monitor.lock().map_err(|_| "Monitor terkunci.")?;
+    if guard.is_some() {
+        return Ok(());
+    }
+    // Jika recorder sedang aktif merekam, jangan mulai monitor
+    if let Ok(rec_guard) = state.recorder.lock() {
+        if rec_guard.is_some() {
+            return Ok(());
+        }
+    }
+    match capture::Monitor::start(app, device_name.as_deref(), sensitivity.as_deref()) {
+        Ok(mon) => {
+            *guard = Some(mon);
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+#[tauri::command]
+pub fn voice_monitor_stop(
+    state: State<'_, VoiceState>,
+) -> Result<(), String> {
+    let mut guard = state.monitor.lock().map_err(|_| "Monitor terkunci.")?;
+    *guard = None;
+    Ok(())
+}
+
 fn strip_xml_tag(s: &mut String, tag: &str) {
     let open_tag = format!("<{tag}>");
     let close_tag = format!("</{tag}>");
@@ -434,7 +474,20 @@ fn clean_for_tts(text: &str) -> String {
     }
     let trimmed = s.trim();
     if trimmed.is_empty() {
-        // Jangan mengembalikan proses berpikir jika tidak ada jawaban
+        // Jika tidak ada teks di luar tag tetapi tag sudah ditutup (model menaruh jawaban di dalam tag),
+        // gunakan teks tersebut sebagai fallback agar TTS tidak membisu.
+        let has_closed = text.contains("</think>") || text.contains("</thought>") || text.contains("</reasoning>");
+        if has_closed {
+            let mut fallback = text.to_string();
+            for tag in &["think", "thought", "reasoning"] {
+                fallback = fallback
+                    .replace(&format!("<{tag}>"), "")
+                    .replace(&format!("</{tag}>"), "");
+            }
+            if !fallback.trim().is_empty() {
+                return strip_markdown(&fallback);
+            }
+        }
         return String::new();
     }
     strip_markdown(&s)

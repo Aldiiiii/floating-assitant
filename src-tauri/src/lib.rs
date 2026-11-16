@@ -1,7 +1,7 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Emitter, Manager,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
@@ -59,11 +59,11 @@ fn focus_main(app: &tauri::AppHandle) {
 
 fn toggle_main(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
-        if win.is_visible().unwrap_or(false) {
-            let _ = win.hide();
-        } else {
+        let is_visible = win.is_visible().unwrap_or(false);
+        if !is_visible {
             focus_main(app);
         }
+        let _ = win.emit("toggle-chat", ());
     }
 }
 
@@ -115,6 +115,8 @@ pub fn run() {
             voice::audio_devices,
             voice::voice_start,
             voice::voice_stop,
+            voice::voice_monitor_start,
+            voice::voice_monitor_stop,
             voice::tts_speak,
             voice::tts_pause,
             voice::tts_stop,
@@ -176,6 +178,18 @@ pub fn run() {
             } else {
                 println!("[info] Shortcut global aktif: Alt+Space");
             }
+
+            if let Err(e) = app.global_shortcut().register("Alt+C") {
+                eprintln!("[info] Shortcut global alternatif \"Alt+C\" tidak didaftarkan: {e}");
+            } else {
+                println!("[info] Shortcut global aktif: Alt+C");
+            }
+
+            // Disk Hygiene: Bersihkan file cache audio sisa sesi sebelumnya (> 12 jam) di background
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                platform::paths::clean_cache_dir(&app_handle, std::time::Duration::from_secs(12 * 3600));
+            });
 
             Ok(())
         })

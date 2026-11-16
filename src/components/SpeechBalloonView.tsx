@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useWindowDrag } from "../lib/useWindowDrag";
 import type { DockSide } from "../lib/window";
 import { ChatPanel } from "./ChatPanel";
@@ -7,6 +8,37 @@ import { DasaiMochiFace } from "./DasaiMochiFace";
 interface SpeechBalloonViewProps {
   onClose: () => void;
   dock: DockSide;
+}
+
+type ResizeDirection =
+  | "East"
+  | "North"
+  | "NorthEast"
+  | "NorthWest"
+  | "South"
+  | "SouthEast"
+  | "SouthWest"
+  | "West";
+
+function ResizeHandle({
+  direction,
+  className,
+}: {
+  direction: ResizeDirection;
+  className: string;
+}) {
+  return (
+    <div
+      onPointerDown={(e) => {
+        if (e.button === 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          void getCurrentWindow().startResizeDragging(direction);
+        }
+      }}
+      className={`absolute z-40 select-none ${className}`}
+    />
+  );
 }
 
 export function SpeechBalloonView({ onClose, dock }: SpeechBalloonViewProps) {
@@ -18,6 +50,16 @@ export function SpeechBalloonView({ onClose, dock }: SpeechBalloonViewProps) {
 
   return (
     <div className="relative flex h-full w-full select-none items-stretch justify-center p-1.5 bg-transparent">
+      {/* Perimeter Window Resize Handles */}
+      <ResizeHandle direction="West" className="left-0 top-3 bottom-3 w-2.5 cursor-ew-resize" />
+      <ResizeHandle direction="East" className="right-0 top-3 bottom-3 w-2.5 cursor-ew-resize" />
+      <ResizeHandle direction="North" className="top-0 left-3 right-3 h-2.5 cursor-ns-resize" />
+      <ResizeHandle direction="South" className="bottom-0 left-3 right-3 h-2.5 cursor-ns-resize" />
+      <ResizeHandle direction="NorthWest" className="left-0 top-0 w-3.5 h-3.5 cursor-nwse-resize" />
+      <ResizeHandle direction="NorthEast" className="right-0 top-0 w-3.5 h-3.5 cursor-nesw-resize" />
+      <ResizeHandle direction="SouthWest" className="left-0 bottom-0 w-3.5 h-3.5 cursor-nesw-resize" />
+      <ResizeHandle direction="SouthEast" className="right-0 bottom-0 w-3.5 h-3.5 cursor-nwse-resize" />
+
       <div
         className={`flex h-full w-full items-${
           isBottom ? "end" : "start"
@@ -45,7 +87,14 @@ export function SpeechBalloonView({ onClose, dock }: SpeechBalloonViewProps) {
         )}
 
         {/* Chat Panel & Ekor Balon Percakapan */}
-        <div className="relative flex h-full w-[380px] shrink-0 flex-col">
+        <div className="relative flex h-full flex-1 min-w-[280px] flex-col">
+          {/* Sisi batas ChatPanel juga bisa di-drag untuk melebarkan/mengecilkan */}
+          {isRight ? (
+            <ResizeHandle direction="East" className="right-0 top-3 bottom-3 w-2 cursor-ew-resize" />
+          ) : (
+            <ResizeHandle direction="West" className="left-0 top-3 bottom-3 w-2 cursor-ew-resize" />
+          )}
+
           {/* Ekor Balon (Speech Bubble Tail) */}
           <div
             className={`pointer-events-none absolute z-20 flex items-center ${

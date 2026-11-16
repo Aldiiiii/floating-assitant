@@ -114,11 +114,11 @@ pub fn trim_silence(pcm: &[f32], sample_rate: u32) -> Vec<f32> {
 }
 
 /// Pipeline evaluasi VAD: multi-channel → mono → 16 kHz → High-Pass 130Hz (meredam gemuruh kipas laptop & hembusan angin).
+/// Catatan: Jangan panggil normalize_volume pada VAD agar tidak memperkuat noise lantai/hening.
 pub fn to_vad_pcm(input: &[f32], channels: usize, rate: u32) -> Vec<f32> {
     let mono = to_mono(input, channels);
     let mut resampled = resample(&mono, rate, 16_000);
     high_pass_filter(&mut resampled, 16_000, 130.0);
-    normalize_volume(&mut resampled);
     resampled
 }
 

@@ -50,19 +50,54 @@ function CodeBlock({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) 
   );
 }
 
+function stripToolCall(text: string): string {
+  let s = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "");
+  const unclosedCall = s.indexOf("<tool_call");
+  if (unclosedCall !== -1) {
+    s = s.slice(0, unclosedCall);
+  }
+  s = s.replace(/<function=[^>]*>[\s\S]*?<\/function>/gi, "");
+  const unclosedFunc = s.indexOf("<function=");
+  if (unclosedFunc !== -1) {
+    s = s.slice(0, unclosedFunc);
+  }
+  return s.trim();
+}
+
 function parseThinkContent(raw: string): { thinkText: string | null; isThinking: boolean; mainText: string } {
-  const thinkStart = raw.indexOf("<think>");
-  if (thinkStart === -1) {
-    return { thinkText: null, isThinking: false, mainText: raw };
+  const cleanedRaw = stripToolCall(raw);
+  const thinkMatches = Array.from(cleanedRaw.matchAll(/<think>([\s\S]*?)<\/think>/gi));
+
+  if (thinkMatches.length === 0) {
+    const unclosedStart = cleanedRaw.indexOf("<think>");
+    if (unclosedStart !== -1) {
+      // Sedang dalam proses berpikir (streaming)
+      const thinkText = cleanedRaw.slice(unclosedStart + 7).trim();
+      return { thinkText, isThinking: true, mainText: cleanedRaw.slice(0, unclosedStart).trim() };
+    }
+    return { thinkText: null, isThinking: false, mainText: cleanedRaw };
   }
-  const thinkEnd = raw.indexOf("</think>", thinkStart + 7);
-  if (thinkEnd === -1) {
-    // Sedang dalam proses berpikir (streaming)
-    const thinkText = raw.slice(thinkStart + 7).trim();
-    return { thinkText, isThinking: true, mainText: "" };
+
+  // Ambil dan deduplikasi semua blok <think>
+  const uniqueThinks: string[] = [];
+  for (const match of thinkMatches) {
+    const t = match[1].trim();
+    if (t && !uniqueThinks.includes(t)) {
+      uniqueThinks.push(t);
+    }
   }
-  const thinkText = raw.slice(thinkStart + 7, thinkEnd).trim();
-  const mainText = (raw.slice(0, thinkStart) + raw.slice(thinkEnd + 8)).trim();
+  const thinkText = uniqueThinks.join("\n\n---\n\n");
+
+  // Hapus semua pasangan <think>...</think> dari mainText
+  const mainText = cleanedRaw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+  // Bila model meletakkan seluruh jawabannya di dalam <think> tanpa ada teks di luar,
+  // gunakan thinkText sebagai jawaban utama agar ditampilkan berformat lengkap
+  // dan pengguna tidak melihat layar kosong.
+  if (!mainText && thinkText) {
+    return { thinkText: null, isThinking: false, mainText: thinkText };
+  }
+
   return { thinkText, isThinking: false, mainText };
 }
 

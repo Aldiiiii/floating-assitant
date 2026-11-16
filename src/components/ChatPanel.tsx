@@ -98,7 +98,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
             type="button"
             onPointerDown={stopDrag}
             onClick={onClose}
-            title="Minimalkan (Esc)"
+            title="Tutup chat (Esc / Alt+C / Ctrl+/)"
             className={controlButtonClass}
           >
             <Icon name="minimize" className="h-3.5 w-3.5" />

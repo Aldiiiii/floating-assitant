@@ -254,6 +254,81 @@ impl Recorder {
     }
 }
 
+fn build_monitor_stream<T: cpal::SizedSample + 'static>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    convert: fn(T) -> f32,
+    app: AppHandle,
+    sensitivity: Option<&str>,
+) -> Result<cpal::Stream, String> {
+    let meter = Arc::new(Mutex::new(MeterEmitter {
+        meter: AudioLevelMeter::new(config.sample_rate as f32, sensitivity),
+        last_emit: Instant::now(),
+    }));
+
+    device
+        .build_input_stream(
+            config.clone(),
+            move |data: &[T], _| {
+                if let Ok(mut emitter) = meter.lock() {
+                    if emitter.last_emit.elapsed() >= Duration::from_millis(45) {
+                        emitter.last_emit = Instant::now();
+                        let level = emitter.meter.process_frame(data.iter().map(|&v| convert(v)));
+                        let _ = app.emit("voice-audio-level", level);
+                    }
+                }
+            },
+            |err| eprintln!("monitor input error: {err}"),
+            None,
+        )
+        .map_err(map_open_error)
+}
+
+/// Monitor audio level mikrofon tanpa alokasi buffer rekaman.
+/// Digunakan untuk Voice Barge-in saat asisten sedang berbicara.
+pub struct Monitor {
+    _stream: cpal::Stream,
+}
+
+impl Monitor {
+    pub fn start(
+        app: AppHandle,
+        device_name: Option<&str>,
+        sensitivity: Option<&str>,
+    ) -> Result<Monitor, String> {
+        let (device, _resolved_name) = resolve_input_device(device_name)?;
+        let supported = device
+            .default_input_config()
+            .map_err(|e| format!("Gagal membaca konfigurasi microphone monitor: {e}"))?;
+
+        let stream_config: cpal::StreamConfig = supported.clone().into();
+        let fmt = supported.sample_format();
+
+        let stream = match fmt {
+            cpal::SampleFormat::F32 => {
+                build_monitor_stream::<f32>(&device, &stream_config, |v| v, app, sensitivity)
+            }
+            cpal::SampleFormat::I16 => {
+                build_monitor_stream::<i16>(&device, &stream_config, |v| v as f32 / 32_768.0, app, sensitivity)
+            }
+            cpal::SampleFormat::U16 => {
+                build_monitor_stream::<u16>(&device, &stream_config, |v| {
+                    (f32::from(v) - 32_768.0) / 32_768.0
+                }, app, sensitivity)
+            }
+            other => {
+                return Err(format!(
+                    "Format sample microphone tidak didukung untuk monitor: {other:?}"
+                ))
+            }
+        }?;
+
+        stream.play().map_err(|e| format!("Gagal memulai stream monitor: {e}"))?;
+
+        Ok(Monitor { _stream: stream })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,15 +2,38 @@
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::AppHandle;
 
 use crate::platform::paths;
 
 static TTS_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<ExitStatus, String> {
+    let start = Instant::now();
+    let poll_interval = Duration::from_millis(50);
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "Proses melebihi batas waktu pengaman (timeout {} detik).",
+                        timeout.as_secs()
+                    ));
+                }
+                std::thread::sleep(poll_interval);
+            }
+            Err(e) => return Err(format!("Gagal memeriksa status proses: {e}")),
+        }
+    }
+}
 
 pub struct PiperSetup {
     pub bin: PathBuf,
@@ -92,11 +115,46 @@ fn synthesize_edge_tts(
     let mut last_err = String::new();
     let mut success = false;
 
-    for py_bin in ["python", "py", "python3"] {
-        let mut cmd = Command::new(py_bin);
-        cmd.arg("-m")
-            .arg("edge_tts")
-            .arg("--voice")
+    let mut candidates: Vec<(String, Vec<String>)> = vec![
+        ("edge-tts".into(), vec![]),
+        ("uvx".into(), vec!["edge-tts".into()]),
+        ("python".into(), vec!["-m".into(), "edge_tts".into()]),
+        ("py".into(), vec!["-m".into(), "edge_tts".into()]),
+        ("python3".into(), vec!["-m".into(), "edge_tts".into()]),
+    ];
+
+    #[cfg(windows)]
+    {
+        let local_appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        let appdata = std::env::var("APPDATA").unwrap_or_default();
+        let roots = [
+            format!("{local_appdata}\\Programs\\Python"),
+            format!("{appdata}\\Python"),
+        ];
+        for root in &roots {
+            let p = std::path::Path::new(root);
+            if let Ok(entries) = std::fs::read_dir(p) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let edge_exe = path.join("Scripts").join("edge-tts.exe");
+                    if edge_exe.exists() {
+                        candidates.push((edge_exe.to_string_lossy().to_string(), vec![]));
+                    }
+                    let py_exe = path.join("python.exe");
+                    if py_exe.exists() {
+                        candidates.push((py_exe.to_string_lossy().to_string(), vec!["-m".into(), "edge_tts".into()]));
+                    }
+                }
+            }
+        }
+    }
+
+    for (bin, extra_args) in candidates {
+        let mut cmd = Command::new(&bin);
+        for a in &extra_args {
+            cmd.arg(a);
+        }
+        cmd.arg("--voice")
             .arg(voice_name)
             .arg("--rate")
             .arg(&rate_str)
@@ -115,7 +173,7 @@ fn synthesize_edge_tts(
         }
 
         match cmd.spawn() {
-            Ok(mut child) => match child.wait() {
+            Ok(mut child) => match wait_with_timeout(&mut child, Duration::from_secs(15)) {
                 Ok(status) => {
                     if status.success() && out.exists() {
                         success = true;
@@ -130,11 +188,11 @@ fn synthesize_edge_tts(
                     }
                 }
                 Err(e) => {
-                    last_err = format!("Gagal menunggu proses {py_bin}: {e}");
+                    last_err = format!("Gagal pada proses {bin}: {e}");
                 }
             },
             Err(e) => {
-                last_err = format!("Tidak dapat menjalankan {py_bin}: {e}");
+                last_err = format!("Tidak dapat menjalankan {bin}: {e}");
             }
         }
     }
@@ -143,12 +201,13 @@ fn synthesize_edge_tts(
 
     if !success {
         let _ = std::fs::remove_file(&out);
-        return Err(if last_err.is_empty() {
-            "Gagal menjalankan Edge-TTS. Pastikan Python dan edge-tts terpasang (pip install edge-tts)."
-                .to_string()
-        } else {
-            format!("Gagal sintesis Edge-TTS: {last_err}")
-        });
+        return Err(format!(
+            "Edge-TTS tidak dapat dijalankan di komputer ini.\n\n\
+             Buka Terminal / Command Prompt lalu jalankan:\n\
+             pip install edge-tts\n\n\
+             Atau gunakan suara offline lokal (Piper) lewat Pengaturan → Voice yang bisa langsung dipakai tanpa Python.\n\
+             (Detail: {last_err})"
+        ));
     }
 
     Ok(out)
@@ -205,9 +264,8 @@ pub fn synthesize(
         let _ = stdin.write_all(text.as_bytes());
         let _ = stdin.write_all(b"\n");
     }
-    let status = child
-        .wait()
-        .map_err(|e| format!("Piper berhenti mendadak: {e}"))?;
+    let status = wait_with_timeout(&mut child, Duration::from_secs(30))
+        .map_err(|e| format!("Piper gagal: {e}"))?;
 
     if !status.success() || !out.exists() {
         let _ = std::fs::remove_file(&out);
@@ -237,5 +295,39 @@ mod tests {
         assert_eq!(voice_file_name("id").unwrap(), "id_ID-news_tts-medium");
         assert_eq!(voice_file_name("en").unwrap(), "en_US-lessac-medium");
         assert!(voice_file_name("id-gadis").is_err());
+    }
+
+    #[test]
+    fn test_wait_with_timeout_success() {
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("cmd");
+            c.args(["/c", "exit 0"]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", "exit 0"]);
+            c
+        };
+        let mut child = cmd.spawn().expect("spawn test process");
+        let status = wait_with_timeout(&mut child, Duration::from_secs(5)).expect("wait with timeout");
+        assert!(status.success());
+    }
+
+    #[test]
+    fn test_wait_with_timeout_expired() {
+        let mut cmd = if cfg!(windows) {
+            let mut c = Command::new("powershell");
+            c.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 5"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.args(["5"]);
+            c
+        };
+        if let Ok(mut child) = cmd.spawn() {
+            let res = wait_with_timeout(&mut child, Duration::from_millis(150));
+            assert!(res.is_err());
+            assert!(res.unwrap_err().contains("timeout"));
+        }
     }
 }

@@ -30,13 +30,18 @@ pub fn search_keys_get() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "brave": read("brave-api-key"),
         "tavily": read("tavily-api-key"),
+        "searxng": read("searxng-url"),
     }))
 }
 
 /// Some(value non-kosong) = simpan/ubah; Some("") = hapus; None = jangan ubah.
 /// Semantik parsial mencegah penyimpanan key satu provider menghapus provider lain.
 #[tauri::command]
-pub fn search_keys_set(brave: Option<String>, tavily: Option<String>) -> Result<(), String> {
+pub fn search_keys_set(
+    brave: Option<String>,
+    tavily: Option<String>,
+    searxng: Option<String>,
+) -> Result<(), String> {
     if let Some(v) = brave.as_deref().map(str::trim) {
         if v.is_empty() {
             delete_secret("brave-api-key")?;
@@ -49,6 +54,13 @@ pub fn search_keys_set(brave: Option<String>, tavily: Option<String>) -> Result<
             delete_secret("tavily-api-key")?;
         } else {
             set_secret("tavily-api-key", v)?;
+        }
+    }
+    if let Some(v) = searxng.as_deref().map(str::trim) {
+        if v.is_empty() {
+            delete_secret("searxng-url")?;
+        } else {
+            set_secret("searxng-url", v)?;
         }
     }
     Ok(())

@@ -1,22 +1,28 @@
 import { useEffect, useState } from "react";
 import { useChatStore } from "../stores/chat";
 import { useVoiceStore } from "../stores/voice";
+import { playBargeInCue } from "../lib/earcons";
 
 interface DasaiMochiFaceProps {
   isHovered?: boolean;
 }
 
-type RobotEmotion = "idle" | "blink" | "look-left" | "look-right" | "happy" | "listening" | "thinking";
+type RobotEmotion = "idle" | "blink" | "look-left" | "look-right" | "happy" | "listening" | "thinking" | "speaking";
 
 export function DasaiMochiFace({ isHovered = false }: DasaiMochiFaceProps) {
   const streaming = useChatStore((s) => s.streaming);
   const isRecording = useVoiceStore((s) => s.state === "recording");
+  const speaking = useVoiceStore((s) => s.speaking);
   const audioLevel = useVoiceStore((s) => s.audioLevel);
   const [emotion, setEmotion] = useState<RobotEmotion>("idle");
 
   useEffect(() => {
     if (isHovered) {
       setEmotion("happy");
+      return;
+    }
+    if (speaking) {
+      setEmotion("speaking");
       return;
     }
     if (isRecording) {
@@ -52,24 +58,53 @@ export function DasaiMochiFace({ isHovered = false }: DasaiMochiFaceProps) {
 
     let timer = loop();
     return () => clearTimeout(timer);
-  }, [isHovered, isRecording, streaming]);
+  }, [isHovered, isRecording, speaking, streaming]);
 
   const active = isHovered
     ? "happy"
-    : isRecording
-      ? "listening"
-      : streaming
-        ? "thinking"
-        : emotion;
+    : speaking
+      ? "speaking"
+      : isRecording
+        ? "listening"
+        : streaming
+          ? "thinking"
+          : emotion;
 
   // Offset posisi melirik bola mata
   const glanceX =
     active === "look-left" ? -5 : active === "look-right" ? 5 : 0;
 
   return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-[#080906] select-none shadow-[inset_0_2px_4px_rgba(255,255,255,0.25)]">
+    <div
+      onClick={() => {
+        if (speaking) {
+          playBargeInCue();
+          useVoiceStore.getState().stopSpeaking();
+          useChatStore.getState().stop();
+          useChatStore.getState().markInterrupted();
+          const s = useVoiceStore.getState();
+          if (s.mode === "dialog" && s.dialogActive && s.state === "idle") {
+            void s.startRecording().catch(() => undefined);
+          }
+        }
+      }}
+      className={`relative flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-[#080906] select-none shadow-[inset_0_2px_4px_rgba(255,255,255,0.25)] ${
+        speaking ? "cursor-pointer hover:opacity-90 active:scale-[0.98]" : ""
+      }`}
+      title={speaking ? "Klik untuk menyela (barge-in)" : undefined}
+    >
       {/* Cincin Lingkar Luar Cyber Glow (Neon Lime Accents) */}
-      <div className="pointer-events-none absolute inset-0 rounded-full border-[2px] border-[#c8f16b]/50 shadow-[0_0_15px_rgba(200,241,107,0.35),inset_0_0_8px_rgba(200,241,107,0.2)]" />
+      <div
+        className={`pointer-events-none absolute inset-0 rounded-full border-[2px] transition-all duration-200 ${
+          isRecording
+            ? "border-[#c8f16b] shadow-[0_0_20px_rgba(200,241,107,0.6),inset_0_0_12px_rgba(200,241,107,0.3)] scale-[1.03]"
+            : speaking
+              ? "border-[#dbff8c] shadow-[0_0_18px_rgba(219,255,140,0.5),inset_0_0_10px_rgba(219,255,140,0.25)]"
+              : streaming
+                ? "border-[#70d6ff] shadow-[0_0_16px_rgba(112,214,255,0.45),inset_0_0_8px_rgba(112,214,255,0.25)]"
+                : "border-[#c8f16b]/50 shadow-[0_0_15px_rgba(200,241,107,0.35),inset_0_0_8px_rgba(200,241,107,0.2)]"
+        }`}
+      />
 
       {/* Pantulan Kaca Lengkung Layar OLED (Curved Glass Glare) */}
       <div className="pointer-events-none absolute -left-4 -top-6 h-14 w-20 rotate-[-30deg] bg-gradient-to-b from-white/20 via-white/5 to-transparent" />
@@ -77,12 +112,15 @@ export function DasaiMochiFace({ isHovered = false }: DasaiMochiFaceProps) {
       {/* Titik LED Status di Sudut Kanan Atas */}
       <div className="pointer-events-none absolute right-3 top-3 flex items-center opacity-85">
         <span
-          className={`h-1.5 w-1.5 rounded-full ${streaming
-              ? "bg-[#ff7b90] animate-ping"
+          className={`h-1.5 w-1.5 rounded-full ${
+            streaming
+              ? "bg-[#70d6ff] animate-ping"
               : isRecording
                 ? "bg-[#c8f16b] animate-pulse"
-                : "bg-[#c8f16b]/80"
-            }`}
+                : speaking
+                  ? "bg-[#c8f16b] animate-bounce"
+                  : "bg-[#c8f16b]/80"
+          }`}
         />
       </div>
 
@@ -114,6 +152,22 @@ export function DasaiMochiFace({ isHovered = false }: DasaiMochiFaceProps) {
             <path d="M 16 34 Q 24 20 31 34" />
             {/* Mata Kanan ^ */}
             <path d="M 33 34 Q 40 20 48 34" />
+          </g>
+        ) : active === "speaking" ? (
+          /* Mode Berbicara (Mata Senyum Hidup + Garis Gelombang Suara) */
+          <g>
+            <g stroke="url(#cyberEyeGrad)" strokeWidth="4" strokeLinecap="round" fill="none">
+              <path d="M 16 30 Q 23 20 30 30" />
+              <path d="M 34 30 Q 41 20 48 30" />
+            </g>
+            {/* Gelombang Suara (Vocal Waveform) di Bawah Mata */}
+            <g fill="url(#cyberEyeGrad)">
+              <rect x="22" y="38" width="3" height="6" rx="1.5" className="animate-pulse" style={{ animationDuration: "0.28s" }} />
+              <rect x="27" y="36" width="3" height="10" rx="1.5" className="animate-pulse" style={{ animationDuration: "0.22s" }} />
+              <rect x="32" y="35" width="3" height="12" rx="1.5" className="animate-pulse" style={{ animationDuration: "0.25s" }} />
+              <rect x="37" y="36" width="3" height="10" rx="1.5" className="animate-pulse" style={{ animationDuration: "0.20s" }} />
+              <rect x="42" y="38" width="3" height="6" rx="1.5" className="animate-pulse" style={{ animationDuration: "0.26s" }} />
+            </g>
           </g>
         ) : active === "blink" ? (
           /* Kedip Halus (Garis Tebal Digital Horisontal) */

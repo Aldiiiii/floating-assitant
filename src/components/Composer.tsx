@@ -38,6 +38,7 @@ export function Composer() {
   const audioLevel = useVoiceStore((s) => s.audioLevel);
   const speaking = useVoiceStore((s) => s.speaking);
   const dialogActive = useVoiceStore((s) => s.dialogActive);
+  const dialogStandby = useVoiceStore((s) => s.dialogStandby);
   const setDialogActive = useVoiceStore((s) => s.setDialogActive);
   const voiceError = useVoiceStore((s) => s.error);
   const playbackError = useVoiceStore((s) => s.playbackError);
@@ -103,7 +104,11 @@ export function Composer() {
     }
   }, [streamingText]);
 
+  const isFinishingRef = useRef(false);
+
   const finishRecording = async () => {
+    if (isFinishingRef.current) return;
+    isFinishingRef.current = true;
     try {
       const result = await stopRecording();
       if (result?.text) {
@@ -156,11 +161,12 @@ export function Composer() {
     } catch {
       /* error ditangani via event voice-state */
     } finally {
+      isFinishingRef.current = false;
       baseTextRef.current = "";
     }
   };
 
-  // Daftarkan listener VAD (Voice Activity Detection auto-stop ketika hening > 1.2 detik)
+  // Daftarkan listener VAD (Voice Activity Detection auto-stop ketika hening terdeteksi)
   useEffect(() => {
     registerVadSilenceHandler(() => {
       void finishRecording();
@@ -196,6 +202,17 @@ export function Composer() {
 
   const onMicClick = () => {
     if (!micEnabled) return;
+    if (speaking) {
+      // Barge-in manual via klik tombol mic saat asisten sedang berbicara
+      useVoiceStore.getState().stopSpeaking();
+      stop();
+      useChatStore.getState().markInterrupted();
+      if (voiceMode === "dialog") {
+        setDialogActive(true);
+        void startRecording().catch(() => undefined);
+      }
+      return;
+    }
     if (voiceMode === "dialog") {
       if (dialogActive || isRecording) {
         setDialogActive(false);
@@ -217,13 +234,19 @@ export function Composer() {
     }
   };
 
+  const sendingRef = useRef(false);
+
   const doSend = () => {
-    if (!value.trim() || streaming) return;
-    void send(value);
+    if (!value.trim() || streaming || sendingRef.current) return;
+    sendingRef.current = true;
+    const toSend = value;
     setValue("");
     requestAnimationFrame(() => {
       const input = document.querySelector<HTMLTextAreaElement>("textarea");
       if (input) input.style.height = "auto";
+    });
+    void send(toSend).finally(() => {
+      sendingRef.current = false;
     });
   };
 
@@ -233,15 +256,33 @@ export function Composer() {
     {voiceMode === "dialog" && dialogActive && (
       <div className="mb-2 flex items-center justify-between rounded-lg border border-[#c8f16b]/30 bg-[#c8f16b]/10 px-2.5 py-1 text-[10px] text-[#dbff8c]">
         <div className="flex items-center gap-2">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#c8f16b] opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#c8f16b]" />
-          </span>
+          {isRecording ? (
+            <div className="flex items-center gap-0.5 h-3" title="Mendengarkan">
+              <span className="w-0.5 rounded-full bg-[#c8f16b] transition-all duration-75" style={{ height: `${Math.max(3, Math.min(12, 3 + audioLevel * 24))}px` }} />
+              <span className="w-0.5 rounded-full bg-[#c8f16b] transition-all duration-75" style={{ height: `${Math.max(5, Math.min(12, 5 + audioLevel * 32))}px` }} />
+              <span className="w-0.5 rounded-full bg-[#c8f16b] transition-all duration-75" style={{ height: `${Math.max(3, Math.min(12, 3 + audioLevel * 20))}px` }} />
+              <span className="w-0.5 rounded-full bg-[#c8f16b] transition-all duration-75" style={{ height: `${Math.max(2, Math.min(12, 2 + audioLevel * 28))}px` }} />
+            </div>
+          ) : speaking ? (
+            <div className="flex items-center gap-0.5 h-3" title="Asisten sedang berbicara">
+              <span className="w-0.5 h-2 rounded-full bg-[#dbff8c] animate-pulse" style={{ animationDuration: "0.28s" }} />
+              <span className="w-0.5 h-3 rounded-full bg-[#dbff8c] animate-pulse" style={{ animationDuration: "0.22s" }} />
+              <span className="w-0.5 h-2.5 rounded-full bg-[#dbff8c] animate-pulse" style={{ animationDuration: "0.25s" }} />
+              <span className="w-0.5 h-1.5 rounded-full bg-[#dbff8c] animate-pulse" style={{ animationDuration: "0.32s" }} />
+            </div>
+          ) : isTranscribing ? (
+            <span className="h-2.5 w-2.5 animate-spin rounded-full border border-[#c8f16b] border-t-transparent" />
+          ) : (
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#c8f16b] opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#c8f16b]" />
+            </span>
+          )}
           <span>
             {isRecording
-              ? "Mode Dialog Aktif · Mendengarkan suara Anda…"
+              ? "Mendengarkan... (bicara kapan saja)"
               : speaking
-              ? "Mode Dialog Aktif · Asisten sedang menjawab…"
+              ? "Astra sedang menjawab... (bisa dipotong langsung)"
               : isTranscribing
               ? "Menyalin suara…"
               : "Mode Dialog Aktif · Siap berbicara"}
@@ -253,10 +294,41 @@ export function Composer() {
             setDialogActive(false);
             if (isRecording) void cancelRecording();
           }}
-          className="text-[9px] underline text-[#dbff8c]/80 hover:text-white"
+          className="text-[9px] underline text-[#dbff8c]/80 hover:text-white ml-2"
         >
           Keluar
         </button>
+      </div>
+    )}
+
+    {voiceMode === "dialog" && dialogStandby && (
+      <div className="mb-2 flex items-center justify-between rounded-lg border border-white/10 bg-white/[.04] px-2.5 py-1 text-[10px] text-[#dbdad3]">
+        <div className="flex items-center gap-2">
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-[#aaa9a1]" />
+          <span>Mode Dialog Siaga (hening). Klik tombol untuk lanjut.</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setDialogActive(true);
+              if (voiceState === "idle") {
+                baseTextRef.current = "";
+                void startRecording().catch(() => undefined);
+              }
+            }}
+            className="rounded bg-[#c8f16b]/20 px-1.5 py-0.5 text-[9px] font-medium text-[#c8f16b] hover:bg-[#c8f16b]/30"
+          >
+            Bicara Lagi
+          </button>
+          <button
+            type="button"
+            onClick={() => setDialogActive(false)}
+            className="text-[9px] text-[#85857d] hover:text-white"
+          >
+            Tutup
+          </button>
+        </div>
       </div>
     )}
 
@@ -438,6 +510,7 @@ export function Composer() {
           </div>
 
           <textarea
+            autoFocus
             value={value}
             onChange={(event) => {
               setValue(event.target.value);

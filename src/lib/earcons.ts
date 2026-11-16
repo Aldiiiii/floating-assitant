@@ -110,3 +110,34 @@ export function playBargeInCue() {
   }
 }
 
+/**
+ * Play a gentle sleep/standby chime when dialog mode enters standby due to inactivity.
+ * Frequencies: 523.25 Hz (C5) -> 392.00 Hz (G4), soothing descending transition.
+ */
+export function playStandbyCue() {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(523.25, now); // C5
+    osc.frequency.exponentialRampToValueAtTime(392.0, now + 0.12); // G4
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.045, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.24);
+  } catch {
+    // Ignore audio playback errors
+  }
+}
+
