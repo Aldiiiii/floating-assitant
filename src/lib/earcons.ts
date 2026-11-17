@@ -85,6 +85,9 @@ export function playDoneCue() {
  * Play a very quick micro-blip when barge-in interrupts the assistant's speech.
  */
 export function playBargeInCue() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("astra-barge-in"));
+  }
   try {
     const ctx = getAudioContext();
     if (!ctx) return;

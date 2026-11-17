@@ -25,6 +25,9 @@ cd "$project_dir"
 echo "==> Memasang dependency Node secara reproducible..."
 npm ci
 
+# Pastikan build target directory berada di dalam repositori (bukan override D:/b milik Windows)
+export CARGO_TARGET_DIR="$project_dir/src-tauri/target"
+
 echo "==> Membuat .deb dan AppImage..."
 npm run tauri build -- --bundles deb,appimage
 

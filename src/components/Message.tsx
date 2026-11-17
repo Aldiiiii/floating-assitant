@@ -29,7 +29,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       onClick={handleCopy}
       title="Salin jawaban AI ke clipboard"
-      className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60 ${
+      className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all duration-100 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60 ${
         copied
           ? "bg-[#c8f16b]/20 text-[#c8f16b]"
           : "text-[#8e8d84] hover:bg-white/[0.08] hover:text-[#ecebe5]"
@@ -52,7 +52,7 @@ function SpeakButton({ text }: { text: string }) {
       <button
         onClick={() => void speakFullText(speakable)}
         title="Bacakan jawaban"
-        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-[#8e8d84] transition-all hover:bg-white/[0.08] hover:text-[#ecebe5] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60"
+        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-[#8e8d84] transition-all duration-100 hover:bg-white/[0.08] hover:text-[#ecebe5] active:scale-[0.94] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60"
       >
         <Icon name={"volume" as IconName} className="h-3 w-3" />
         Bacakan
@@ -63,7 +63,7 @@ function SpeakButton({ text }: { text: string }) {
       <button
         onClick={togglePause}
         title={paused ? "Lanjutkan" : "Jeda"}
-        className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60 ${
+        className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-all duration-100 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60 ${
           paused ? "text-[#c8f16b]" : "text-[#dbdad3]"
         }`}
       >
@@ -73,7 +73,7 @@ function SpeakButton({ text }: { text: string }) {
       <button
         onClick={stopSpeaking}
         title="Hentikan"
-        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-[#f07167] transition-all hover:bg-[#f07167]/10 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#f07167]/60"
+        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-[#f07167] transition-all duration-100 hover:bg-[#f07167]/10 active:scale-[0.94] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#f07167]/60"
       >
         <Icon name="stop" className="h-3 w-3" />
         Stop
@@ -160,7 +160,7 @@ export function Message({
           <button
             onClick={() => void useChatStore.getState().regenerate()}
             title="Buat ulang jawaban"
-            className="inline-flex items-center gap-1 rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-0.5 font-medium text-[#8e8d84] transition-all hover:bg-white/[0.08] hover:text-[#ecebe5] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60"
+            className="inline-flex items-center gap-1 rounded-md border border-white/[0.06] bg-white/[0.03] px-2 py-0.5 font-medium text-[#8e8d84] transition-all duration-100 hover:bg-white/[0.08] hover:text-[#ecebe5] active:scale-[0.94] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60"
           >
             <Icon name="refresh" className="h-3 w-3" />
             <span>Buat ulang</span>

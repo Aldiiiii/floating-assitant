@@ -79,11 +79,11 @@ Jalankan checklist ini di Mint native sebelum menerbitkan paket:
 | LM Studio dan SQLite lokal | Siap diuji native |
 | Voice STT/TTS | x86_64; siap diuji perangkat audio |
 | Screenshot fullscreen/area | X11; siap diuji perangkat |
-| Screenshot active window | Belum diimplementasikan; mengembalikan error terkontrol |
+| Screenshot active window | X11 (EWMH _NET_ACTIVE_WINDOW & _NET_WM_PID); siap diuji native |
 | Native rounded-window mask | Fallback transparansi GTK; belum parity Windows |
 | Wayland/portal | Belum didukung penuh |
 
-`platform/linux/shape.rs` sengaja merupakan no-op yang aman: aplikasi tetap memakai window transparan Tauri/GTK, tetapi mask native X11 belum dibuat. `platform/linux/window.rs` belum mendapatkan PID jendela aktif sehingga mode screenshot active-window belum tersedia.
+`platform/linux/shape.rs` sengaja merupakan no-op yang aman: aplikasi tetap memakai window transparan Tauri/GTK, tetapi mask native X11 belum dibuat. `platform/linux/window.rs` telah mengimplementasikan deteksi PID jendela aktif via EWMH standar (`xdotool` atau fallback bawaan `xprop`).
 
 ## X11, Wayland, dan arsitektur
 

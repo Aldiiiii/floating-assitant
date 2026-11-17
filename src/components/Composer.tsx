@@ -436,7 +436,7 @@ export function Composer() {
               }}
               disabled={capturing}
               title="Tambahkan screenshot"
-              className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all active:scale-[0.96] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60 ${
+              className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-100 active:scale-[0.93] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60 ${
                 menuOpen
                   ? "bg-[#c8f16b] text-[#161712]"
                   : "text-[#aaa9a1] hover:bg-white/[.07] hover:text-white"
@@ -447,7 +447,7 @@ export function Composer() {
             {menuOpen && (
               <div
                 onClick={(event) => event.stopPropagation()}
-                className="absolute bottom-full left-0 z-20 mb-2 w-56 rounded-xl border border-white/[.12] bg-[#22221f]/95 p-1.5 shadow-[0_12px_36px_rgba(0,0,0,.5)] backdrop-blur-md"
+                className="animate-popover-in absolute bottom-full left-0 z-20 mb-2 w-56 rounded-xl border border-white/[.12] bg-[#22221f]/95 p-1.5 shadow-[0_12px_36px_rgba(0,0,0,.5)] backdrop-blur-md"
               >
                 <p className="px-2.5 py-1 text-[10px] font-medium text-zinc-400">
                   Mode tangkapan layar
@@ -490,7 +490,7 @@ export function Composer() {
                     : "Mulai Mode Dialog (klik untuk bicara langsung)"
                   : "Klik mulai/berhenti merekam"
               }
-              className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-all active:scale-[0.96] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60 ${
+              className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-100 active:scale-[0.93] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60 ${
                 voiceMode === "dialog" && dialogActive
                   ? "bg-[#c8f16b]/20 text-[#c8f16b] ring-1 ring-[#c8f16b]/50"
                   : isTranscribing
@@ -540,7 +540,7 @@ export function Composer() {
               type="button"
               onClick={stop}
               title="Hentikan respons"
-              className="mb-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-white/[.09] text-[#eeeeea] hover:bg-white/[.15] active:scale-[0.96] transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60"
+              className="mb-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-white/[.09] text-[#eeeeea] hover:bg-white/[.15] active:scale-[0.93] duration-100 transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60"
             >
               <Icon name="stop" className="h-3.5 w-3.5" />
             </button>
@@ -550,7 +550,7 @@ export function Composer() {
               onClick={doSend}
               disabled={!value.trim()}
               title="Kirim"
-              className="mb-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-[#c8f16b] text-[#171812] hover:bg-[#dbff8c] disabled:bg-white/[.06] disabled:text-[#66665f] active:scale-[0.96] transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60"
+              className="mb-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-[#c8f16b] text-[#171812] hover:bg-[#dbff8c] disabled:bg-white/[.06] disabled:text-[#66665f] active:scale-[0.93] duration-100 transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60"
             >
               <Icon name="send" className="h-3.5 w-3.5" />
             </button>

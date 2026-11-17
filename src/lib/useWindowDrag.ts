@@ -21,12 +21,27 @@ export function useWindowDrag(onActivate?: () => void) {
     dragTimerRef.current = null;
   }, []);
 
-  const startNativeDrag = useCallback(() => {
+  const startNativeDrag = useCallback(async () => {
     const gesture = gestureRef.current;
     if (!gesture || gesture.dragging) return;
     gesture.dragging = true;
     clearDragTimer();
-    void getCurrentWindow().startDragging();
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("astra-window-drag", { detail: true }));
+    }
+    try {
+      await getCurrentWindow().startDragging();
+    } catch {
+      // Abaikan jika drag dibatalkan oleh OS
+    } finally {
+      if (gestureRef.current) {
+        gestureRef.current.dragging = false;
+        gestureRef.current = null;
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("astra-window-drag", { detail: false }));
+      }
+    }
   }, [clearDragTimer]);
 
   const onPointerDown = useCallback((event: React.PointerEvent) => {
@@ -47,6 +62,9 @@ export function useWindowDrag(onActivate?: () => void) {
   const finish = useCallback(() => {
     const gesture = gestureRef.current;
     clearDragTimer();
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("astra-window-drag", { detail: false }));
+    }
     gestureRef.current = null;
     if (gesture && !gesture.dragging) activateRef.current?.();
   }, [clearDragTimer]);

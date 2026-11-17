@@ -17,10 +17,15 @@ export function MessageList() {
   useEffect(() => {
     const element = containerRef.current;
     if (element && nearBottomRef.current) {
-      element.scrollTo({
-        top: element.scrollHeight,
-        behavior: streaming ? "auto" : "smooth",
-      });
+      if (streaming) {
+        // Direct scroll lock saat streaming mencegah animation frame thrashing / jitter
+        element.scrollTop = element.scrollHeight;
+      } else {
+        element.scrollTo({
+          top: element.scrollHeight,
+          behavior: "smooth",
+        });
+      }
     }
   }, [messages, streaming]);
 
@@ -48,7 +53,7 @@ export function MessageList() {
                 key={item}
                 type="button"
                 onClick={() => setPrompt(item)}
-                className="w-full text-left rounded-lg border border-white/[.06] bg-white/[.02] px-3 py-2 text-[11px] text-zinc-400 transition-colors hover:border-white/[.12] hover:bg-white/[.04] hover:text-zinc-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60"
+                className="w-full text-left rounded-lg border border-white/[.06] bg-white/[.02] px-3 py-2 text-[11px] text-zinc-400 transition-all duration-100 hover:border-white/[.12] hover:bg-white/[.04] hover:text-zinc-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60"
               >
                 {item}
               </button>
@@ -69,7 +74,7 @@ export function MessageList() {
             element.scrollHeight - element.scrollTop - element.clientHeight < 70;
         }
       }}
-      className="flex-1 space-y-4 overflow-y-auto px-4 py-4"
+      className="flex-1 space-y-4 overflow-y-auto px-4 py-4 [overflow-anchor:auto]"
     >
       {messages.map((message, index) => {
         const isLast = index === messages.length - 1;

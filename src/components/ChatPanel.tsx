@@ -33,7 +33,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
   const stopDrag = (event: React.PointerEvent) => event.stopPropagation();
 
   const controlButtonClass =
-    "flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[.07] hover:text-zinc-100 active:scale-[0.95] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60";
+    "flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 transition-all duration-100 hover:bg-white/[.07] hover:text-zinc-100 active:scale-[0.93] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c8f16b]/60";
 
   return (
     <div className="assistant-panel relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-white/[.08] bg-[#141413] text-[#e4e3dd] shadow-2xl">

@@ -21,11 +21,18 @@ function CodeBlock({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) 
   const [copied, setCopied] = useState(false);
   const lang = useMemo(() => extractLang(children), [children]);
   return (
-    <div className="group/code my-3 overflow-hidden border border-white/[.1] bg-[#11110f]">
-      <div className="flex items-center justify-between border-b border-white/[.07] bg-white/[.035] px-3 py-1.5">
-        <span className="text-[9px] font-semibold uppercase tracking-[.15em] text-[#777770]">
-          {lang ?? "code"}
-        </span>
+    <div className="group/code my-3 overflow-hidden rounded-xl border border-white/[.1] bg-[#11110f] shadow-md">
+      <div className="flex items-center justify-between border-b border-white/[.07] bg-white/[.035] px-3.5 py-1.5 backdrop-blur-sm">
+        <div className="flex items-center gap-2">
+          <span className="flex gap-1.5 opacity-60">
+            <span className="h-1.5 w-1.5 rounded-full bg-white/[.3]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-white/[.3]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-white/[.3]" />
+          </span>
+          <span className="font-mono text-[9px] font-semibold uppercase tracking-[.15em] text-[#8e8d85]">
+            {lang ?? "code"}
+          </span>
+        </div>
         <button
           onClick={() => {
             void navigator.clipboard.writeText(ref.current?.innerText ?? "").then(() => {
@@ -33,9 +40,9 @@ function CodeBlock({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) 
               setTimeout(() => setCopied(false), 1500);
             });
           }}
-          className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-all ${
+          className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-all duration-100 active:scale-[0.93] ${
             copied
-              ? "text-[#c8f16b]"
+              ? "bg-[#c8f16b]/20 text-[#c8f16b]"
               : "text-[#85857d] hover:bg-white/[0.08] hover:text-[#ecebe5]"
           }`}
         >
@@ -43,7 +50,7 @@ function CodeBlock({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) 
           <span>{copied ? "Tersalin!" : "Copy"}</span>
         </button>
       </div>
-      <pre {...rest} ref={ref} className="m-0 overflow-x-auto bg-[#11110f] p-3 text-xs leading-relaxed">
+      <pre {...rest} ref={ref} className="m-0 overflow-x-auto bg-[#0d0d0b] p-3.5 font-mono text-xs leading-relaxed">
         {children}
       </pre>
     </div>

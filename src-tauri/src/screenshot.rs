@@ -73,7 +73,7 @@ fn capture_main_monitor() -> Result<RgbaImage, String> {
         .map_err(|e| format!("Screenshot gagal diambil. ({e})"))
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn capture_window_by_pid(pid: u32) -> Result<RgbaImage, String> {
     let windows = xcap::Window::all().map_err(|e| format!("Screenshot gagal diambil. ({e})"))?;
     let mut best: Option<(u64, RgbaImage)> = None;
@@ -91,7 +91,7 @@ fn capture_window_by_pid(pid: u32) -> Result<RgbaImage, String> {
         .ok_or_else(|| "Tidak dapat menemukan window aktif.".to_string())
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn capture_window_by_pid(_pid: u32) -> Result<RgbaImage, String> {
     Err("Capture window aktif belum didukung di platform ini.".into())
 }

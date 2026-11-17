@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useWindowDrag } from "../lib/useWindowDrag";
 import type { DockSide } from "../lib/window";
@@ -42,7 +42,28 @@ function ResizeHandle({
 }
 
 export function SpeechBalloonView({ onClose, dock }: SpeechBalloonViewProps) {
-  const dragPet = useWindowDrag(onClose);
+  const clickCountRef = useRef(0);
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Pisahkan Single Click (Tutup Chat) vs Double Click (Mode Hyped > <)
+  const handlePetClick = useCallback(() => {
+    clickCountRef.current += 1;
+    if (clickCountRef.current === 1) {
+      clickTimerRef.current = setTimeout(() => {
+        clickCountRef.current = 0;
+        onClose();
+      }, 230);
+    } else if (clickCountRef.current >= 2) {
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
+      clickCountRef.current = 0;
+      window.dispatchEvent(new CustomEvent("astra-pet-double-click"));
+    }
+  }, [onClose]);
+
+  const dragPet = useWindowDrag(handlePetClick);
   const [isPetHovered, setIsPetHovered] = useState(false);
 
   const isRight = dock.side === "right";
